@@ -1,0 +1,38 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+provider-checker
+/dist/
+/bin/
+/tmp/
+
+# Test / coverage
+*.test
+*.out
+coverage.out
+coverage.html
+
+# Go workspace / local
+go.work
+go.work.sum
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# Local secrets / history (never commit)
+history.json
+*.env
+.env
+.env.*
+
+# Build artifacts
+resource.syso
+!resource_windows.syso

@@ -116,4 +116,3 @@ MIT — see [LICENSE](LICENSE).
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
-
