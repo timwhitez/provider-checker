@@ -46,9 +46,9 @@ func (c GeminiChecker) Test(ctx context.Context, cfg Config, feature, prompt str
 			return fail("Basic", start, err)
 		}
 		if text == "" {
-			return failMsg("Basic", start, "empty content")
+			return failResponseMsg("Basic", start, "empty content", resp)
 		}
-		return pass("Basic", start, text)
+		return passResponse("Basic", start, text, resp)
 
 	case "stream":
 		endpoint, err := geminiURL(base, cfg.Model, "streamGenerateContent", cfg.APIKey, true)
@@ -64,14 +64,14 @@ func (c GeminiChecker) Test(ctx context.Context, cfg Config, feature, prompt str
 		if resp.StatusCode >= 400 {
 			return failHTTP("Streaming", start, resp)
 		}
-		n, snippet, err := readStream(resp.Body)
+		n, snippet, model, err := readStream(resp.Body)
 		if err != nil {
 			return fail("Streaming", start, err)
 		}
 		if n == 0 {
 			return failMsg("Streaming", start, "no chunks received")
 		}
-		return pass("Streaming", start, fmt.Sprintf("%d chunks; %s", n, snippet))
+		return passWithResponseModel("Streaming", start, fmt.Sprintf("%d chunks; %s", n, snippet), model)
 
 	case "vision":
 		endpoint, err := geminiURL(base, cfg.Model, "generateContent", cfg.APIKey, false)
@@ -103,9 +103,9 @@ func (c GeminiChecker) Test(ctx context.Context, cfg Config, feature, prompt str
 			return fail("Vision", start, err)
 		}
 		if text == "" {
-			return failMsg("Vision", start, "empty content")
+			return failResponseMsg("Vision", start, "empty content", resp)
 		}
-		return pass("Vision", start, text)
+		return passResponse("Vision", start, text, resp)
 
 	case "tools":
 		endpoint, err := geminiURL(base, cfg.Model, "generateContent", cfg.APIKey, false)
@@ -155,11 +155,11 @@ func (c GeminiChecker) Test(ctx context.Context, cfg Config, feature, prompt str
 			for _, p := range cand.Content.Parts {
 				if p.FunctionCall.Name != "" {
 					ab, _ := json.Marshal(p.FunctionCall.Args)
-					return pass("Function Calling", start, fmt.Sprintf("%s(%s)", p.FunctionCall.Name, string(ab)))
+					return passResponse("Function Calling", start, fmt.Sprintf("%s(%s)", p.FunctionCall.Name, string(ab)), resp)
 				}
 			}
 		}
-		return failMsg("Function Calling", start, "no functionCall in response")
+		return failResponseMsg("Function Calling", start, "no functionCall in response", resp)
 
 	case "json":
 		endpoint, err := geminiURL(base, cfg.Model, "generateContent", cfg.APIKey, false)
@@ -187,12 +187,12 @@ func (c GeminiChecker) Test(ctx context.Context, cfg Config, feature, prompt str
 			return fail("JSON Mode", start, err)
 		}
 		if text == "" {
-			return failMsg("JSON Mode", start, "empty content")
+			return failResponseMsg("JSON Mode", start, "empty content", resp)
 		}
 		if !looksLikeJSON(text) {
-			return failMsg("JSON Mode", start, "response is not valid JSON: "+text)
+			return failResponseMsg("JSON Mode", start, "response is not valid JSON: "+text, resp)
 		}
-		return pass("JSON Mode", start, text)
+		return passResponse("JSON Mode", start, text, resp)
 
 	case "system":
 		endpoint, err := geminiURL(base, cfg.Model, "generateContent", cfg.APIKey, false)
@@ -213,9 +213,9 @@ func (c GeminiChecker) Test(ctx context.Context, cfg Config, feature, prompt str
 			return fail("System Instruction", start, err)
 		}
 		if text == "" {
-			return failMsg("System Instruction", start, "empty content")
+			return failResponseMsg("System Instruction", start, "empty content", resp)
 		}
-		return pass("System Instruction", start, text)
+		return passResponse("System Instruction", start, text, resp)
 	}
 
 	return skip(feature)

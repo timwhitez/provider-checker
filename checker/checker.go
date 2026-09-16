@@ -55,11 +55,12 @@ func (s Status) String() string {
 
 // FeatureResult is the outcome of testing one feature.
 type FeatureResult struct {
-	Name    string
-	Status  Status
-	Latency time.Duration
-	Detail  string
-	Error   string
+	Name                  string
+	Status                Status
+	Latency               time.Duration
+	UpstreamResponseModel string
+	Detail                string
+	Error                 string
 }
 
 // Feature describes a testable capability.

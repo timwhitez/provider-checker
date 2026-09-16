@@ -278,6 +278,7 @@ func main() {
 											{Title: "Feature", Width: 180},
 											{Title: "Status", Width: 80, Alignment: AlignCenter},
 											{Title: "Latency", Width: 90, Alignment: AlignCenter},
+											{Title: "Upstream Model / 上游响应模型", Width: 220},
 											{Title: "Detail", Width: 320},
 											{Title: "Error", Width: 280},
 										},
@@ -628,6 +629,9 @@ func startRun(u *uiRefs, st *appState) {
 					if r.Detail != "" {
 						line += "  " + truncate(r.Detail, 80)
 					}
+					if r.UpstreamResponseModel != "" {
+						line += "  upstream_model=" + truncate(r.UpstreamResponseModel, 120)
+					}
 					if r.Error != "" {
 						line += "  err=" + truncate(r.Error, 120)
 					}
@@ -944,7 +948,7 @@ func writeResultsCSV(path string, results []checker.FeatureResult) error {
 	defer f.Close()
 
 	w := csv.NewWriter(f)
-	if err := w.Write([]string{"Feature", "Status", "LatencyMs", "Detail", "Error"}); err != nil {
+	if err := w.Write([]string{"Feature", "Status", "LatencyMs", "UpstreamResponseModel", "Detail", "Error"}); err != nil {
 		return err
 	}
 	for _, r := range results {
@@ -952,7 +956,7 @@ func writeResultsCSV(path string, results []checker.FeatureResult) error {
 		if r.Latency > 0 {
 			lat = fmt.Sprintf("%d", r.Latency.Milliseconds())
 		}
-		if err := w.Write([]string{r.Name, r.Status.String(), lat, r.Detail, r.Error}); err != nil {
+		if err := w.Write([]string{r.Name, r.Status.String(), lat, r.UpstreamResponseModel, r.Detail, r.Error}); err != nil {
 			return err
 		}
 	}

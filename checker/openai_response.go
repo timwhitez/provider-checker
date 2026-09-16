@@ -51,9 +51,9 @@ func (c OpenAIResponseChecker) Test(ctx context.Context, cfg Config, feature, pr
 			return fail("Basic", start, err)
 		}
 		if text == "" {
-			return failMsg("Basic", start, "empty output text")
+			return failResponseMsg("Basic", start, "empty output text", resp)
 		}
-		return pass("Basic", start, text)
+		return passResponse("Basic", start, text, resp)
 
 	case "stream":
 		body := map[string]any{
@@ -70,14 +70,14 @@ func (c OpenAIResponseChecker) Test(ctx context.Context, cfg Config, feature, pr
 		if resp.StatusCode >= 400 {
 			return failHTTP("Streaming", start, resp)
 		}
-		n, snippet, err := readStream(resp.Body)
+		n, snippet, model, err := readStream(resp.Body)
 		if err != nil {
 			return fail("Streaming", start, err)
 		}
 		if n == 0 {
 			return failMsg("Streaming", start, "no chunks received")
 		}
-		return pass("Streaming", start, fmt.Sprintf("%d chunks; %s", n, snippet))
+		return passWithResponseModel("Streaming", start, fmt.Sprintf("%d chunks; %s", n, snippet), model)
 
 	case "vision":
 		body := map[string]any{
@@ -103,9 +103,9 @@ func (c OpenAIResponseChecker) Test(ctx context.Context, cfg Config, feature, pr
 			return fail("Vision", start, err)
 		}
 		if text == "" {
-			return failMsg("Vision", start, "empty output text")
+			return failResponseMsg("Vision", start, "empty output text", resp)
 		}
-		return pass("Vision", start, text)
+		return passResponse("Vision", start, text, resp)
 
 	case "tools":
 		body := map[string]any{
@@ -141,10 +141,10 @@ func (c OpenAIResponseChecker) Test(ctx context.Context, cfg Config, feature, pr
 		}
 		for _, o := range r.Output {
 			if o.Type == "function_call" {
-				return pass("Tool Calling", start, fmt.Sprintf("%s(%s)", o.Name, o.Args))
+				return passResponse("Tool Calling", start, fmt.Sprintf("%s(%s)", o.Name, o.Args), resp)
 			}
 		}
-		return failMsg("Tool Calling", start, "no function_call in output")
+		return failResponseMsg("Tool Calling", start, "no function_call in output", resp)
 
 	case "json":
 		body := map[string]any{
@@ -179,12 +179,12 @@ func (c OpenAIResponseChecker) Test(ctx context.Context, cfg Config, feature, pr
 			return fail("JSON Mode", start, err)
 		}
 		if text == "" {
-			return failMsg("JSON Mode", start, "empty output text")
+			return failResponseMsg("JSON Mode", start, "empty output text", resp)
 		}
 		if !looksLikeJSON(text) {
-			return failMsg("JSON Mode", start, "response is not valid JSON: "+text)
+			return failResponseMsg("JSON Mode", start, "response is not valid JSON: "+text, resp)
 		}
-		return pass("JSON Mode", start, text)
+		return passResponse("JSON Mode", start, text, resp)
 	}
 
 	return skip(feature)

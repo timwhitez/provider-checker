@@ -52,6 +52,12 @@ Output: `provider-checker.exe` (embeds Common Controls 6 + DPI awareness via `re
 6. Tick capabilities and click **Run Check**  
 7. Use **Stop**, **Export CSV**, **Clear**, and the **History** tab as needed  
 
+For every completed probe, the result table, log, and CSV also show the raw
+**Upstream Model / 上游响应模型** declared by the provider response. This is
+useful for detecting a proxy that routes a requested alias to a different
+concrete model. It is intentionally left blank when the provider does not
+declare a model; the app never substitutes the requested model name.
+
 History is stored under the user config dir: `provider-checker/history.json` (max 200 entries). API keys are DPAPI-protected on Windows and never written in plaintext.
 
 ## Capability matrix
@@ -107,7 +113,7 @@ provider-checker/
 - API keys are only sent to the Base URL you configure.
 - Anthropic requests start with the official `x-api-key` scheme and retry once with Bearer auth only when the same endpoint returns `401`; this keeps official API keys and `ANTHROPIC_AUTH_TOKEN` gateways compatible.
 - History encrypts keys with DPAPI (current Windows user); ciphertext is not portable across machines/users.
-- Prefer HTTPS endpoints and treat export/logs as potentially sensitive (model names, response snippets).
+- Prefer HTTPS endpoints and treat export/logs as potentially sensitive (requested and upstream model names, response snippets).
 
 ## License
 

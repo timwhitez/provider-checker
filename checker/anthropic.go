@@ -46,9 +46,9 @@ func (c AnthropicChecker) Test(ctx context.Context, cfg Config, feature, prompt 
 			return fail("Basic", start, err)
 		}
 		if text == "" {
-			return failMsg("Basic", start, "empty content")
+			return failResponseMsg("Basic", start, "empty content", resp)
 		}
-		return pass("Basic", start, text)
+		return passResponse("Basic", start, text, resp)
 
 	case "stream":
 		body := map[string]any{
@@ -65,14 +65,14 @@ func (c AnthropicChecker) Test(ctx context.Context, cfg Config, feature, prompt 
 		if resp.StatusCode >= 400 {
 			return failHTTP("Streaming", start, resp)
 		}
-		n, snippet, err := readStream(resp.Body)
+		n, snippet, model, err := readStream(resp.Body)
 		if err != nil {
 			return fail("Streaming", start, err)
 		}
 		if n == 0 {
 			return failMsg("Streaming", start, "no chunks received")
 		}
-		return pass("Streaming", start, fmt.Sprintf("%d chunks; %s", n, snippet))
+		return passWithResponseModel("Streaming", start, fmt.Sprintf("%d chunks; %s", n, snippet), model)
 
 	case "vision":
 		// Anthropic image source supports base64 media, not remote SVG hosts.
@@ -103,9 +103,9 @@ func (c AnthropicChecker) Test(ctx context.Context, cfg Config, feature, prompt 
 			return fail("Vision", start, err)
 		}
 		if text == "" {
-			return failMsg("Vision", start, "empty content")
+			return failResponseMsg("Vision", start, "empty content", resp)
 		}
-		return pass("Vision", start, text)
+		return passResponse("Vision", start, text, resp)
 
 	case "tools":
 		body := map[string]any{
@@ -142,10 +142,10 @@ func (c AnthropicChecker) Test(ctx context.Context, cfg Config, feature, prompt 
 		for _, b := range r.Content {
 			if b.Type == "tool_use" {
 				ib, _ := json.Marshal(b.Input)
-				return pass("Tool Use", start, fmt.Sprintf("%s(%s)", b.Name, string(ib)))
+				return passResponse("Tool Use", start, fmt.Sprintf("%s(%s)", b.Name, string(ib)), resp)
 			}
 		}
-		return failMsg("Tool Use", start, "no tool_use block in content")
+		return failResponseMsg("Tool Use", start, "no tool_use block in content", resp)
 
 	case "max_tokens":
 		body := map[string]any{
@@ -177,7 +177,7 @@ func (c AnthropicChecker) Test(ctx context.Context, cfg Config, feature, prompt 
 		if len(r.Content) > 0 {
 			text = r.Content[0].Text
 		}
-		return pass("Max Tokens", start, fmt.Sprintf("content=%q output_tokens=%d stop_reason=%s", text, r.Usage.OutputTokens, r.StopReason))
+		return passResponse("Max Tokens", start, fmt.Sprintf("content=%q output_tokens=%d stop_reason=%s", text, r.Usage.OutputTokens, r.StopReason), resp)
 
 	case "system":
 		body := map[string]any{
@@ -199,9 +199,9 @@ func (c AnthropicChecker) Test(ctx context.Context, cfg Config, feature, prompt 
 			return fail("System Prompt", start, err)
 		}
 		if text == "" {
-			return failMsg("System Prompt", start, "empty content")
+			return failResponseMsg("System Prompt", start, "empty content", resp)
 		}
-		return pass("System Prompt", start, text)
+		return passResponse("System Prompt", start, text, resp)
 	}
 
 	return skip(feature)
@@ -249,7 +249,7 @@ func doAnthropicJSON(ctx context.Context, cfg Config, method, endpoint string, b
 			return nil, err
 		}
 		if resp.StatusCode != http.StatusUnauthorized || cfg.APIKey == "" || attempt == 1 {
-			return resp, nil
+			return trackResponseModel(resp), nil
 		}
 
 		// Drain a small bounded amount before closing so the transport can reuse

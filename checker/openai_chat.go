@@ -55,9 +55,9 @@ func (c OpenAIChatChecker) Test(ctx context.Context, cfg Config, feature, prompt
 			return fail("Basic", start, err)
 		}
 		if txt == "" {
-			return failMsg("Basic", start, "no content in response")
+			return failResponseMsg("Basic", start, "no content in response", resp)
 		}
-		return pass("Basic", start, txt)
+		return passResponse("Basic", start, txt, resp)
 
 	case "stream":
 		body := map[string]any{
@@ -77,14 +77,14 @@ func (c OpenAIChatChecker) Test(ctx context.Context, cfg Config, feature, prompt
 		if resp.StatusCode >= 400 {
 			return failHTTP("Streaming", start, resp)
 		}
-		n, snippet, err := readStream(resp.Body)
+		n, snippet, model, err := readStream(resp.Body)
 		if err != nil {
 			return fail("Streaming", start, err)
 		}
 		if n == 0 {
 			return failMsg("Streaming", start, "no chunks received")
 		}
-		return pass("Streaming", start, fmt.Sprintf("%d chunks; %s", n, snippet))
+		return passWithResponseModel("Streaming", start, fmt.Sprintf("%d chunks; %s", n, snippet), model)
 
 	case "vision":
 		body := map[string]any{
@@ -111,9 +111,9 @@ func (c OpenAIChatChecker) Test(ctx context.Context, cfg Config, feature, prompt
 			return fail("Vision", start, err)
 		}
 		if txt == "" {
-			return failMsg("Vision", start, "no content in response")
+			return failResponseMsg("Vision", start, "no content in response", resp)
 		}
-		return pass("Vision", start, txt)
+		return passResponse("Vision", start, txt, resp)
 
 	case "tools":
 		body := map[string]any{
@@ -159,10 +159,10 @@ func (c OpenAIChatChecker) Test(ctx context.Context, cfg Config, feature, prompt
 			return fail("Tool Calling", start, err)
 		}
 		if len(r.Choices) == 0 || len(r.Choices[0].Message.ToolCalls) == 0 {
-			return failMsg("Tool Calling", start, "model did not emit a tool_call")
+			return failResponseMsg("Tool Calling", start, "model did not emit a tool_call", resp)
 		}
 		tc := r.Choices[0].Message.ToolCalls[0]
-		return pass("Tool Calling", start, fmt.Sprintf("%s(%s)", tc.Function.Name, tc.Function.Arguments))
+		return passResponse("Tool Calling", start, fmt.Sprintf("%s(%s)", tc.Function.Name, tc.Function.Arguments), resp)
 
 	case "json":
 		body := map[string]any{
@@ -185,12 +185,12 @@ func (c OpenAIChatChecker) Test(ctx context.Context, cfg Config, feature, prompt
 			return fail("JSON Mode", start, err)
 		}
 		if txt == "" {
-			return failMsg("JSON Mode", start, "no content in response")
+			return failResponseMsg("JSON Mode", start, "no content in response", resp)
 		}
 		if !looksLikeJSON(txt) {
-			return failMsg("JSON Mode", start, "response is not valid JSON: "+txt)
+			return failResponseMsg("JSON Mode", start, "response is not valid JSON: "+txt, resp)
 		}
-		return pass("JSON Mode", start, txt)
+		return passResponse("JSON Mode", start, txt, resp)
 
 	case "max_tokens":
 		body := map[string]any{
@@ -222,10 +222,10 @@ func (c OpenAIChatChecker) Test(ctx context.Context, cfg Config, feature, prompt
 			return fail("Max Tokens", start, err)
 		}
 		if len(r.Choices) == 0 {
-			return failMsg("Max Tokens", start, "no choices in response")
+			return failResponseMsg("Max Tokens", start, "no choices in response", resp)
 		}
-		return pass("Max Tokens", start, fmt.Sprintf("content=%q completion_tokens=%d finish_reason=%s",
-			r.Choices[0].Message.Content, r.Usage.CompletionTokens, r.Choices[0].FinishReason))
+		return passResponse("Max Tokens", start, fmt.Sprintf("content=%q completion_tokens=%d finish_reason=%s",
+			r.Choices[0].Message.Content, r.Usage.CompletionTokens, r.Choices[0].FinishReason), resp)
 
 	case "system":
 		body := map[string]any{
@@ -250,9 +250,9 @@ func (c OpenAIChatChecker) Test(ctx context.Context, cfg Config, feature, prompt
 			return fail("System Prompt", start, err)
 		}
 		if txt == "" {
-			return failMsg("System Prompt", start, "no content in response")
+			return failResponseMsg("System Prompt", start, "no content in response", resp)
 		}
-		return pass("System Prompt", start, txt)
+		return passResponse("System Prompt", start, txt, resp)
 	}
 
 	return skip(feature)

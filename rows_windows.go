@@ -44,7 +44,7 @@ type resultModel struct {
 
 func newResultModel() *resultModel {
 	return &resultModel{
-		cols: []string{"Name", "Status", "Latency", "Detail", "Error"},
+		cols: []string{"Name", "Status", "Latency", "Upstream Model", "Detail", "Error"},
 	}
 }
 
@@ -72,8 +72,10 @@ func (m *resultModel) Value(row, col int) interface{} {
 		}
 		return ""
 	case 3:
-		return r.Detail
+		return r.UpstreamResponseModel
 	case 4:
+		return r.Detail
+	case 5:
 		return r.Error
 	}
 	return nil
