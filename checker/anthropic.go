@@ -65,14 +65,7 @@ func (c AnthropicChecker) Test(ctx context.Context, cfg Config, feature, prompt 
 		if resp.StatusCode >= 400 {
 			return failHTTP("Streaming", start, resp)
 		}
-		n, snippet, model, err := readStream(resp.Body)
-		if err != nil {
-			return fail("Streaming", start, err)
-		}
-		if n == 0 {
-			return failMsg("Streaming", start, "no chunks received")
-		}
-		return passWithResponseModel("Streaming", start, fmt.Sprintf("%d chunks; %s", n, snippet), model)
+		return streamingResult(start, resp.Body, validAnthropicStreamEvent)
 
 	case "vision":
 		// Anthropic image source supports base64 media, not remote SVG hosts.
@@ -290,3 +283,25 @@ func decodeAnthropicText(rd io.Reader) (string, error) {
 }
 
 func init() { register(AnthropicChecker{}) }
+
+func validAnthropicStreamEvent(event string, value any) bool {
+	object := streamObject(value)
+	switch streamEventType(event, object) {
+	case "message_start":
+		return streamObject(object["message"]) != nil
+	case "message_delta":
+		return streamObject(object["delta"]) != nil
+	case "message_stop":
+		return object != nil
+	case "content_block_start":
+		_, indexed := object["index"].(float64)
+		return indexed && streamObject(object["content_block"]) != nil
+	case "content_block_delta":
+		_, indexed := object["index"].(float64)
+		return indexed && streamObject(object["delta"]) != nil
+	case "content_block_stop":
+		_, indexed := object["index"].(float64)
+		return indexed
+	}
+	return false
+}

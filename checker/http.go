@@ -110,37 +110,6 @@ func failResponseMsg(name string, start time.Time, msg string, resp *http.Respon
 	return r
 }
 
-// readStream reads chunked SSE bytes and returns chunk count, a short snippet,
-// and the first model identifier declared by a stream event.
-func readStream(r io.Reader) (int, string, string, error) {
-	got := 0
-	tmp := make([]byte, 1024)
-	var buf strings.Builder
-	for {
-		n, rerr := r.Read(tmp)
-		if n > 0 {
-			buf.Write(tmp[:n])
-			got++
-		}
-		if rerr != nil {
-			if rerr == io.EOF {
-				break
-			}
-			// Partial stream still counts as progress for capability probes.
-			snippet := buf.String()
-			if len(snippet) > 120 {
-				snippet = snippet[:120] + "..."
-			}
-			return got, snippet, responseModelFromStream([]byte(buf.String())), nil
-		}
-	}
-	snippet := buf.String()
-	if len(snippet) > 120 {
-		snippet = snippet[:120] + "..."
-	}
-	return got, snippet, responseModelFromStream([]byte(buf.String())), nil
-}
-
 // normalizeV1 ensures the base URL ends with /v1, defaulting when empty.
 func normalizeV1(baseURL, def string) string {
 	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
@@ -252,38 +221,8 @@ func normalizeResponseModel(model string) string {
 // declaration, matching the upstream's final routing decision. It also accepts
 // JSON array frames used by some Gemini streaming endpoints.
 func responseModelFromStream(stream []byte) string {
-	first := ""
-	terminal := ""
-	for _, frame := range strings.Split(string(stream), "\n\n") {
-		var data []string
-		eventType := ""
-		for _, line := range strings.Split(frame, "\n") {
-			if value, ok := strings.CutPrefix(line, "event:"); ok {
-				eventType = strings.TrimSpace(value)
-			}
-			if value, ok := strings.CutPrefix(line, "data:"); ok {
-				value = strings.TrimSpace(value)
-				if value != "" && value != "[DONE]" {
-					data = append(data, value)
-				}
-			}
-		}
-		payload := []byte(strings.Join(data, "\n"))
-		model := responseModelFromJSON(payload)
-		if model == "" {
-			continue
-		}
-		if first == "" {
-			first = model
-		}
-		if responseModelTerminalEvent(eventType, payload) {
-			terminal = model
-		}
-	}
-	if terminal != "" {
-		return terminal
-	}
-	return first
+	result, _ := readStream(bytes.NewReader(stream), func(_ string, _ any) bool { return true })
+	return result.Model
 }
 
 func responseModelTerminalEvent(eventType string, payload []byte) bool {

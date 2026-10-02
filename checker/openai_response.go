@@ -71,14 +71,7 @@ func (c OpenAIResponseChecker) Test(ctx context.Context, cfg Config, feature, pr
 		if resp.StatusCode >= 400 {
 			return failHTTP("Streaming", start, resp)
 		}
-		n, snippet, model, err := readStream(resp.Body)
-		if err != nil {
-			return fail("Streaming", start, err)
-		}
-		if n == 0 {
-			return failMsg("Streaming", start, "no chunks received")
-		}
-		return passWithResponseModel("Streaming", start, fmt.Sprintf("%d chunks; %s", n, snippet), model)
+		return streamingResult(start, resp.Body, validResponsesStreamEvent)
 
 	case "vision":
 		body := map[string]any{
@@ -228,3 +221,30 @@ func decodeResponseText(rd io.Reader) (string, error) {
 }
 
 func init() { register(OpenAIResponseChecker{}) }
+
+func validResponsesStreamEvent(event string, value any) bool {
+	object := streamObject(value)
+	switch streamEventType(event, object) {
+	case "response.created", "response.in_progress", "response.completed", "response.done", "response.incomplete":
+		return streamObject(object["response"]) != nil
+	case "response.output_text.delta", "response.refusal.delta", "response.function_call_arguments.delta", "response.reasoning_summary_text.delta", "response.reasoning_text.delta":
+		_, ok := object["delta"].(string)
+		return ok
+	case "response.output_text.done", "response.reasoning_summary_text.done", "response.reasoning_text.done":
+		_, ok := object["text"].(string)
+		return ok
+	case "response.refusal.done":
+		_, ok := object["refusal"].(string)
+		return ok
+	case "response.function_call_arguments.done":
+		_, ok := object["arguments"].(string)
+		return ok
+	case "response.output_item.added", "response.output_item.done":
+		return streamObject(object["item"]) != nil
+	case "response.content_part.added", "response.content_part.done", "response.reasoning_summary_part.added", "response.reasoning_summary_part.done":
+		return streamObject(object["part"]) != nil
+	case "response.output_text.annotation.added":
+		return streamObject(object["annotation"]) != nil
+	}
+	return false
+}

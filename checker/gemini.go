@@ -64,14 +64,7 @@ func (c GeminiChecker) Test(ctx context.Context, cfg Config, feature, prompt str
 		if resp.StatusCode >= 400 {
 			return failHTTP("Streaming", start, resp)
 		}
-		n, snippet, model, err := readStream(resp.Body)
-		if err != nil {
-			return fail("Streaming", start, err)
-		}
-		if n == 0 {
-			return failMsg("Streaming", start, "no chunks received")
-		}
-		return passWithResponseModel("Streaming", start, fmt.Sprintf("%d chunks; %s", n, snippet), model)
+		return streamingResult(start, resp.Body, validGeminiStreamEvent)
 
 	case "vision":
 		endpoint, err := geminiURL(base, cfg.Model, "generateContent", cfg.APIKey, false)
@@ -304,3 +297,28 @@ func decodeGeminiText(rd io.Reader) (string, error) {
 }
 
 func init() { register(GeminiChecker{}) }
+
+func validGeminiStreamEvent(event string, value any) bool {
+	if event != "" && event != "message" {
+		return false
+	}
+	if items, ok := value.([]any); ok {
+		for _, item := range items {
+			if validGeminiStreamEvent("", item) {
+				return true
+			}
+		}
+		return false
+	}
+	candidates, _ := streamObject(value)["candidates"].([]any)
+	for _, candidate := range candidates {
+		object := streamObject(candidate)
+		if streamObject(object["content"]) != nil {
+			return true
+		}
+		if reason, ok := object["finishReason"].(string); ok && reason != "" {
+			return true
+		}
+	}
+	return false
+}

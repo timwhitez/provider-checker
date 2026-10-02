@@ -4,7 +4,10 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestResponseModelFromJSON(t *testing.T) {
@@ -150,5 +153,115 @@ func TestGeminiProbeShowsDeclaredUpstreamModel(t *testing.T) {
 	}
 	if result.UpstreamResponseModel != "gemini-2.5-pro-001" {
 		t.Fatalf("UpstreamResponseModel = %q, want concrete upstream model", result.UpstreamResponseModel)
+	}
+}
+
+// These HTTP 200 bodies must not prove streaming capability, irrespective of
+// the advertised Content-Type or which provider is being checked.
+func TestStreamingRejectsUnprovenHTTP200(t *testing.T) {
+	bodies := map[string]string{
+		"plain text":     "oops",
+		"JSON error":     `{"error":{"message":"upstream unavailable"}}`,
+		"SSE error":      "event: error\ndata: {\"error\":{\"message\":\"failed\"}}\n\n",
+		"DONE only":      "data: [DONE]\n\n",
+		"heartbeat only": ": keepalive\n\ndata:\n\n",
+		"unrelated JSON": "data: {\"model\":\"not-proof\"}\n\n",
+	}
+	for _, provider := range []Checker{OpenAIChatChecker{}, OpenAIResponseChecker{}, AnthropicChecker{}, GeminiChecker{}} {
+		for name, body := range bodies {
+			t.Run(provider.Type()+"/"+name, func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					w.Header().Set("Content-Type", "text/event-stream")
+					_, _ = w.Write([]byte(body))
+				}))
+				defer server.Close()
+				result := provider.Test(context.Background(), Config{BaseURL: server.URL, Model: "alias"}, "stream", "hello")
+				if result.Status == StatusPass {
+					t.Fatalf("unproven stream reported PASS: %s", result.Detail)
+				}
+			})
+		}
+	}
+}
+
+func TestStreamingProviderFixtures(t *testing.T) {
+	providers := []struct {
+		checker     Checker
+		body, model string
+	}{
+		{OpenAIChatChecker{}, chatStreamFixture, "concrete"},
+		{OpenAIResponseChecker{}, "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"model\":\"alias\"}}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"model\":\"terminal\"}}\n\n", "terminal"},
+		{AnthropicChecker{}, "event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"model\":\"claude-concrete\"}}\n\nevent: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"hello\"}}\n\n", "claude-concrete"},
+		{GeminiChecker{}, "data: [{\"modelVersion\":\"gemini-concrete\",\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hello\"}]}}]}]\n\n", "gemini-concrete"},
+	}
+	for _, provider := range providers {
+		for _, fixture := range []struct {
+			name, suffix    string
+			status          Status
+			partial         bool
+			brokenTransport bool
+		}{
+			{"valid without DONE", "", StatusPass, false, false},
+			{"valid then unclosed tail", "data: {", StatusPass, true, false},
+			{"valid then transport interruption", "", StatusPass, true, true},
+			{"valid then error", "event: error\ndata: {\"error\":{\"message\":\"failed\"}}\n\n", StatusFail, false, false},
+			{"valid then failed payload", "data: {\"type\":\"response.failed\",\"response\":{\"status\":\"failed\"}}\n\n", StatusFail, false, false},
+			{"valid then invalid JSON", "data: {\n\n", StatusFail, false, false},
+			{"valid then frame overflow", "data: " + strings.Repeat("x", streamFrameLimit) + "\n\n", StatusFail, false, false},
+			{"valid then total overflow", strings.Repeat("\n", streamReadLimit), StatusFail, false, false},
+		} {
+			t.Run(provider.checker.Type()+"/"+fixture.name, func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					// A valid body is sufficient even through a proxy with a wrong
+					// media type. This fixture intentionally advertises JSON.
+					w.Header().Set("Content-Type", "application/json")
+					body := provider.body + fixture.suffix
+					if fixture.brokenTransport {
+						w.Header().Set("Content-Length", strconv.Itoa(len(body)+100))
+					}
+					_, _ = w.Write([]byte(body))
+				}))
+				defer server.Close()
+				result := provider.checker.Test(context.Background(), Config{BaseURL: server.URL, Model: "request-alias"}, "stream", "hello")
+				if result.Status != fixture.status || result.UpstreamResponseModel != provider.model {
+					t.Fatalf("result=%+v, want status=%v model=%q", result, fixture.status, provider.model)
+				}
+				if fixture.status == StatusPass && (strings.Contains(result.Detail, "partial:") != fixture.partial || !strings.Contains(result.Detail, " events;")) {
+					t.Fatalf("wrong detail: %q", result.Detail)
+				}
+				if fixture.status == StatusFail && result.Error == "" {
+					t.Fatal("failure reason missing")
+				}
+			})
+		}
+	}
+}
+
+func TestStreamingRejectsWrongProviderContracts(t *testing.T) {
+	for _, provider := range []Checker{OpenAIChatChecker{}, OpenAIResponseChecker{}, AnthropicChecker{}, GeminiChecker{}} {
+		for _, body := range []string{
+			"data: {}\n\n",
+			"data: {\"choices\":[{}],\"candidates\":[{}],\"response\":{},\"message\":{}}\n\n",
+			"event: unknown\ndata: {\"choices\":[{\"delta\":{}}],\"candidates\":[{\"content\":{}}]}\n\n",
+			"data: {\"type\":\"ping\"}\n\n",
+			"data: {\"choices\":[{\"delta\":{}}]}", // no complete frame
+		} {
+			t.Run(provider.Type()+"/"+body, func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) }))
+				defer server.Close()
+				result := provider.Test(context.Background(), Config{BaseURL: server.URL, Model: "request-alias"}, "stream", "hello")
+				if result.Status != StatusFail || result.UpstreamResponseModel != "" {
+					t.Fatalf("result=%+v", result)
+				}
+			})
+		}
+	}
+}
+
+func TestGeminiArrayErrorWinsOverCandidate(t *testing.T) {
+	body := "data: [{\"candidates\":[{\"content\":{}}]},{\"error\":{\"message\":\"failed\"}}]\n\n"
+	result := streamingResult(time.Now(), strings.NewReader(body), validGeminiStreamEvent)
+	if result.Status != StatusFail || !strings.Contains(result.Error, "error/failed") {
+		t.Fatalf("result=%+v", result)
 	}
 }
