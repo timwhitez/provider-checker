@@ -74,6 +74,7 @@ type appState struct {
 	cancel      context.CancelFunc
 	results     []checker.FeatureResult
 	store       *history.Store
+	listing     modelListing
 }
 
 func main() {
@@ -159,6 +160,8 @@ func main() {
 											st.providerKey = providerTypes[idx]
 											st.mu.Unlock()
 											refreshChecks(u.cbChecks, st)
+											refreshReasoning(u, st)
+											invalidateModels(u, st, true)
 											refreshStatus(u.sbiStatus, st)
 										}
 									}
@@ -238,7 +241,7 @@ func main() {
 								}},
 							PushButton{AssignTo: &btnExport, Text: "\U0001F4BE  Export CSV", Font: fontUI, MinSize: Size{Width: 120, Height: 32},
 								OnClicked: func() { exportCSV(u.mw, u.resultsModel.snapshot()) }},
-							PushButton{AssignTo: &btnClear, Text: "Clear", Font: fontUI, MinSize: Size{Width: 90, Height: 32},
+							PushButton{AssignTo: &btnClear, Text: "Clear display", ToolTipText: "Clears the visible table/log only; run summary and history retain all results. CSV exports the visible table.", Font: fontUI, MinSize: Size{Width: 90, Height: 32},
 								OnClicked: func() {
 									u.resultsModel.reset()
 									if u.teLog != nil {
@@ -349,9 +352,22 @@ func main() {
 
 	// Enable/disable capability checkboxes for the default provider and mark Basic checked.
 	refreshChecks(u.cbChecks, st)
-	if len(u.cbChecks) > 0 && u.cbChecks[0] != nil {
-		u.cbChecks[0].SetChecked(true)
+	syncChecks(u.cbChecks, st)
+	refreshReasoning(u, st)
+	for _, field := range []*walk.LineEdit{u.leBaseURL, u.leAPIKey, u.leTimeout} {
+		field.TextChanged().Attach(func() { invalidateModels(u, st, true) })
 	}
+	u.mw.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
+		if *canceled {
+			return
+		}
+		st.listing.close()
+		st.mu.Lock()
+		if st.cancel != nil {
+			st.cancel()
+		}
+		st.mu.Unlock()
+	})
 	refreshStatus(u.sbiStatus, st)
 
 	// Load history in the background so the window can paint immediately.
@@ -413,25 +429,24 @@ func styleCell(tv *walk.TableView, m *resultModel, style *walk.CellStyle) {
 
 // buildCheckWidgets creates a checkbox per unified feature and wires it into state.
 func buildCheckWidgets(cbChecks *[]*walk.CheckBox, st *appState) []Widget {
-	*cbChecks = make([]*walk.CheckBox, 0, len(checker.UnifiedFeatures))
+	*cbChecks = make([]*walk.CheckBox, len(checker.UnifiedFeatures))
 	widgets := make([]Widget, 0, len(checker.UnifiedFeatures))
-	for _, f := range checker.UnifiedFeatures {
+	for i, f := range checker.UnifiedFeatures {
 		key := f.Key
 		name := f.Name
-		var cb *walk.CheckBox
+		slot := &(*cbChecks)[i]
 		w := CheckBox{
-			AssignTo: &cb,
+			AssignTo: slot,
 			Text:     name,
 			Font:     fontUI,
 			OnClicked: func() {
-				if cb != nil {
+				if *slot != nil {
 					st.mu.Lock()
-					st.features[key] = cb.Checked()
+					st.features[key] = (*slot).Checked()
 					st.mu.Unlock()
 				}
 			},
 		}
-		*cbChecks = append(*cbChecks, cb)
 		widgets = append(widgets, w)
 	}
 	return widgets
@@ -583,6 +598,12 @@ func startRun(u *uiRefs, st *appState) {
 	}
 
 	effort, mode := selectedReasoning(u)
+	if pk != "openai-response" {
+		mode = ""
+	}
+	if pk != "openai-response" && pk != "openai-chat" {
+		effort = ""
+	}
 	cfg := checker.Config{
 		BaseURL:         baseURL,
 		APIKey:          apiKey,
@@ -592,6 +613,8 @@ func startRun(u *uiRefs, st *appState) {
 		ReasoningMode:   mode,
 	}
 
+	record := newRunRecord(pk, cfg, prompt, feats)
+	invalidateModels(u, st, false)
 	ctx, cancel := context.WithCancel(context.Background())
 	st.mu.Lock()
 	st.running = true
@@ -599,6 +622,7 @@ func startRun(u *uiRefs, st *appState) {
 	st.mu.Unlock()
 	u.btnRun.SetEnabled(false)
 	u.btnStop.SetEnabled(true)
+	u.btnModels.SetEnabled(false)
 	refreshStatus(u.sbiStatus, st)
 	setSummary(u, "Running...  正在检测", colStatusInit)
 
@@ -619,6 +643,7 @@ func startRun(u *uiRefs, st *appState) {
 			case "feature_done":
 				r := ev.Result
 				r.Name = checker.FeatureName(ev.Feature)
+				record.results = append(record.results, r)
 				u.mw.Synchronize(func() {
 					u.resultsModel.add(r)
 					latency := ""
@@ -639,7 +664,7 @@ func startRun(u *uiRefs, st *appState) {
 				})
 			case "done":
 				u.mw.Synchronize(func() {
-					snap := u.resultsModel.snapshot()
+					snap := append([]checker.FeatureResult(nil), record.results...)
 					st.mu.Lock()
 					st.results = snap
 					st.mu.Unlock()
@@ -647,6 +672,7 @@ func startRun(u *uiRefs, st *appState) {
 					appendLog(u.teLog, fmt.Sprintf("Run finished: PASS=%d FAIL=%d SKIP=%d", p, f, s))
 					u.btnRun.SetEnabled(true)
 					u.btnStop.SetEnabled(false)
+					u.btnModels.SetEnabled(true)
 					st.mu.Lock()
 					st.running = false
 					st.cancel = nil
@@ -663,7 +689,7 @@ func startRun(u *uiRefs, st *appState) {
 					setSummary(u, fmt.Sprintf("检测完成 / Done   PASS=%d   FAIL=%d   SKIP=%d   \u00b7   %s", p, f, s, model), sumColor)
 
 					// Persist to history (best effort). Cancelled runs still recorded.
-					saveHistory(u, st, cfg, pk, feats, p, f, s)
+					saveHistory(u, st, record)
 
 					icon := walk.MsgBoxIconInformation
 					if f > 0 && p == 0 {
@@ -679,7 +705,7 @@ func startRun(u *uiRefs, st *appState) {
 }
 
 // saveHistory records the completed run and refreshes the history table.
-func saveHistory(u *uiRefs, st *appState, cfg checker.Config, providerKey string, feats []string, pass, fail, skip int) {
+func saveHistory(u *uiRefs, st *appState, record *runRecord) {
 	st.mu.Lock()
 	store := st.store
 	st.mu.Unlock()
@@ -697,26 +723,7 @@ func saveHistory(u *uiRefs, st *appState, cfg checker.Config, providerKey string
 	if store == nil {
 		return
 	}
-	prompt := ""
-	if u.lePrompt != nil {
-		prompt = u.lePrompt.Text()
-	}
-	rec := history.Record{
-		Time:            time.Now(),
-		Provider:        providerKey,
-		ProviderLabel:   checker.ProviderLabel(providerKey),
-		BaseURL:         cfg.BaseURL,
-		Model:           cfg.Model,
-		APIKeyEnc:       encryptAPIKey(u, cfg.APIKey),
-		Prompt:          prompt,
-		TimeoutSec:      int(cfg.Timeout / time.Second),
-		ReasoningEffort: cfg.ReasoningEffort,
-		ReasoningMode:   cfg.ReasoningMode,
-		Features:        append([]string(nil), feats...),
-		Pass:            pass,
-		Fail:            fail,
-		Skip:            skip,
-	}
+	rec := record.historyRecord(time.Now(), encryptAPIKey(u, record.cfg.APIKey))
 	if err := store.Add(rec); err != nil {
 		appendLog(u.teLog, "history save failed: "+err.Error())
 		return
@@ -760,8 +767,16 @@ func loadHistoryRow(u *uiRefs, st *appState, row int) {
 		return
 	}
 
-	// Provider dropdown -> also updates st.providerKey via OnCurrentIndexChanged.
-	if idx := providerIndex(rec.Provider); idx >= 0 && u.cbProvider != nil {
+	idx := providerIndex(rec.Provider)
+	if idx < 0 {
+		return
+	}
+	invalidateModels(u, st, true)
+	// Assign state explicitly: SetCurrentIndex need not emit a change for the same provider.
+	st.mu.Lock()
+	st.providerKey = rec.Provider
+	st.mu.Unlock()
+	if u.cbProvider != nil {
 		u.cbProvider.SetCurrentIndex(idx)
 	}
 
@@ -792,13 +807,22 @@ func loadHistoryRow(u *uiRefs, st *appState, row int) {
 		st.features[f.Key] = false
 	}
 	for _, k := range rec.Features {
-		st.features[k] = true
+		if c := checker.AllCheckers[rec.Provider]; c != nil && checker.Supports(c, k) {
+			st.features[k] = true
+		}
 	}
 	st.mu.Unlock()
+	refreshChecks(u.cbChecks, st)
 	syncChecks(u.cbChecks, st)
+	refreshReasoning(u, st)
 
 	appendLog(u.teLog, "Loaded config from history: "+rec.Time.Format("2006-01-02 15:04:05"))
-	setSummary(u, "已载入历史配置 / Loaded history config: "+rec.Model, colStatusInit)
+	st.mu.Lock()
+	running := st.running
+	st.mu.Unlock()
+	if !running {
+		setSummary(u, "已载入历史配置 / Loaded history config: "+rec.Model, colStatusInit)
+	}
 	walk.MsgBox(u.mw, "History Loaded", "已回填该次测试配置（含加密保存的 API Key，已解密回填）。\nConfig loaded (API key was restored from encrypted storage).", walk.MsgBoxIconInformation)
 }
 
@@ -844,7 +868,8 @@ func fetchModels(u *uiRefs, st *appState) {
 		APIKey:  u.leAPIKey.Text(),
 		Timeout: time.Duration(timeoutSec) * time.Second,
 	}
-	current := u.cbModel.Text()
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
+	generation := st.listing.begin(cancel)
 
 	if u.btnModels != nil {
 		u.btnModels.SetEnabled(false)
@@ -852,33 +877,38 @@ func fetchModels(u *uiRefs, st *appState) {
 	appendLog(u.teLog, "Listing models for "+checker.ProviderLabel(pk)+" ...")
 
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), cfg.Timeout)
 		defer cancel()
 		models, err := checker.ListModels(ctx, c, cfg)
-		u.mw.Synchronize(func() {
-			if u.btnModels != nil {
-				u.btnModels.SetEnabled(true)
-			}
-			if err != nil {
-				appendLog(u.teLog, "List models failed: "+err.Error())
-				walk.MsgBox(u.mw, "List models failed", err.Error(), walk.MsgBoxIconError)
-				return
-			}
-			if len(models) == 0 {
-				appendLog(u.teLog, "List models: no models returned.")
-				walk.MsgBox(u.mw, "No models", "服务商未返回任何模型。\nThe provider returned no models.", walk.MsgBoxIconInformation)
-				return
-			}
-			u.modelModel.items = models
-			u.cbModel.SetModel(u.modelModel)
-			// Preserve any manually typed model name.
-			if current != "" {
-				u.cbModel.SetText(current)
-			}
-			appendLog(u.teLog, fmt.Sprintf("List models: %d models loaded.", len(models)))
-			setSummary(u, fmt.Sprintf("已加载 %d 个模型 / Loaded %d models", len(models), len(models)), colStatusInit)
-		})
+		u.mw.Synchronize(func() { completeModelListing(u, st, generation, models, err) })
 	}()
+}
+
+// completeModelListing delivers a result only while its request still owns the form.
+func completeModelListing(u *uiRefs, st *appState, generation uint64, models []string, err error) {
+	if !st.listing.current(generation) {
+		return
+	}
+	st.listing.cancel = nil
+	if u.btnModels != nil {
+		u.btnModels.SetEnabled(true)
+	}
+	if err != nil {
+		appendLog(u.teLog, "List models failed: "+err.Error())
+		walk.MsgBox(u.mw, "List models failed", err.Error(), walk.MsgBoxIconError)
+		return
+	}
+	if len(models) == 0 {
+		appendLog(u.teLog, "List models: no models returned.")
+		walk.MsgBox(u.mw, "No models", "服务商未返回任何模型。\nThe provider returned no models.", walk.MsgBoxIconInformation)
+		return
+	}
+	// Read the latest text at delivery, even when the user cleared it.
+	current := u.cbModel.Text()
+	u.modelModel.items = models
+	u.cbModel.SetModel(u.modelModel)
+	u.cbModel.SetText(current)
+	appendLog(u.teLog, fmt.Sprintf("List models: %d models loaded.", len(models)))
+	setSummary(u, fmt.Sprintf("已加载 %d 个模型 / Loaded %d models", len(models), len(models)), colStatusInit)
 }
 
 // providerIndex returns the dropdown index for a provider type key, or -1.
@@ -962,4 +992,33 @@ func writeResultsCSV(path string, results []checker.FeatureResult) error {
 	}
 	w.Flush()
 	return w.Error()
+}
+
+// invalidateModels is called on the UI thread for any listing ownership change.
+func invalidateModels(u *uiRefs, st *appState, clearList bool) {
+	st.listing.invalidate()
+	if clearList && u.cbModel != nil {
+		current := u.cbModel.Text()
+		u.modelModel.items = nil
+		u.cbModel.SetModel(u.modelModel)
+		u.cbModel.SetText(current)
+	}
+	st.mu.Lock()
+	running := st.running
+	st.mu.Unlock()
+	if u.btnModels != nil {
+		u.btnModels.SetEnabled(!running && !st.listing.closed)
+	}
+}
+
+func refreshReasoning(u *uiRefs, st *appState) {
+	st.mu.Lock()
+	pk := st.providerKey
+	st.mu.Unlock()
+	if u.cbEffort != nil {
+		u.cbEffort.SetEnabled(pk == "openai-chat" || pk == "openai-response")
+	}
+	if u.cbMode != nil {
+		u.cbMode.SetEnabled(pk == "openai-response")
+	}
 }
