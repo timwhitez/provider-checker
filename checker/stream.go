@@ -59,6 +59,7 @@ func readStream(r io.Reader, classify streamClassifier) (streamResult, error) {
 	var event string
 	frameBytes, totalBytes := 0, 0
 	pendingCR := false
+	firstLine := true
 	dispatch := func() error {
 		payload := strings.TrimSpace(data.String())
 		failedEvent := streamFailureType(event)
@@ -100,6 +101,13 @@ func readStream(r io.Reader, classify streamClassifier) (streamResult, error) {
 	finishLine := func() error {
 		text := line.String()
 		line.Reset()
+		// SSE ignores exactly one UTF-8 BOM at the start of the stream.
+		// Waiting for the first physical line handles arbitrary Read splits;
+		// raw bytes have already been counted against both probe budgets.
+		if firstLine {
+			text = strings.TrimPrefix(text, "\ufeff")
+			firstLine = false
+		}
 		if text == "" {
 			err := dispatch()
 			data.Reset()

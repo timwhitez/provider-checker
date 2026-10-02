@@ -2,6 +2,7 @@ package checker
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"math/rand"
 	"strings"
@@ -226,6 +227,68 @@ func TestStreamUnknownEventsAndModelsDoNotProveProgress(t *testing.T) {
 		got, err := readStream(strings.NewReader(body), validResponsesStreamEvent)
 		if err != nil || got.Events != 0 || got.Model != "" {
 			t.Fatalf("unknown typed event: %+v %v", got, err)
+		}
+	}
+}
+
+func TestStreamLeadingBOM(t *testing.T) {
+	for _, chunks := range [][]int{{1}, {2}, {4096}} {
+		for _, tc := range []struct {
+			name, body string
+			wantEvents int
+			wantError  bool
+		}{
+			{"data first", "\ufeff" + chatStreamFixture, 1, false},
+			{"error event first", "\ufeffevent: error\ndata: {}\n\n" + chatStreamFixture, 0, true},
+		} {
+			t.Run(fmt.Sprintf("%s/chunks=%v", tc.name, chunks), func(t *testing.T) {
+				got, err := readStream(&splitStreamReader{data: []byte(tc.body), sizes: chunks}, validChatStreamEvent)
+				if got.Events != tc.wantEvents || (err != nil) != tc.wantError {
+					t.Fatalf("result=%+v error=%v; want events=%d error=%v", got, err, tc.wantEvents, tc.wantError)
+				}
+			})
+		}
+	}
+}
+
+func TestStreamBOMOnlyAtStartAndBudgeted(t *testing.T) {
+	for _, body := range []string{
+		"\ufeff\ufeff" + chatStreamFixture,               // Strip exactly one.
+		"\n\ufeff" + chatStreamFixture,                   // A BOM after even an empty line is data.
+		chatStreamFixture + "\ufeff" + chatStreamFixture, // Later frame field untouched.
+	} {
+		got, err := readStream(&splitStreamReader{data: []byte(body), sizes: []int{1}}, validChatStreamEvent)
+		want := 0
+		if strings.HasPrefix(body, chatStreamFixture) {
+			want = 1
+		}
+		if err != nil || got.Events != want {
+			t.Fatalf("body=%q result=%+v error=%v", body, got, err)
+		}
+	}
+	body := "\ufeffdata: {\"choices\":[{\"delta\":{\"content\":\"a\ufeffb\"}}]}\n\n"
+	got, err := readStream(&splitStreamReader{data: []byte(body), sizes: []int{1}}, validChatStreamEvent)
+	if err != nil || got.Events != 1 || !strings.Contains(got.Snippet, "a\ufeffb") {
+		t.Fatalf("body BOM lost: %+v %v", got, err)
+	}
+	for _, size := range []int{streamFrameLimit, streamFrameLimit + 1} {
+		body = "\ufeff:" + strings.Repeat("x", size-len(chatStreamFixture)-5) + "\n" + chatStreamFixture
+		got, err = readStream(strings.NewReader(body), validChatStreamEvent)
+		if size == streamFrameLimit && (err != nil || got.Events != 1) {
+			t.Fatalf("BOM frame boundary: %+v %v", got, err)
+		}
+		if size > streamFrameLimit && (err == nil || !strings.Contains(err.Error(), "frame exceeds")) {
+			t.Fatalf("BOM frame overflow: %v", err)
+		}
+	}
+	for _, size := range []int{streamReadLimit, streamReadLimit + 1} {
+		body = "\ufeff" + chatStreamFixture + strings.Repeat("\n", size-len(chatStreamFixture)-3)
+		got, err = readStream(strings.NewReader(body), validChatStreamEvent)
+		if size == streamReadLimit && (err != nil || got.Events != 1) {
+			t.Fatalf("BOM total boundary: %+v %v", got, err)
+		}
+		if size > streamReadLimit && (err == nil || !strings.Contains(err.Error(), "stream exceeds")) {
+			t.Fatalf("BOM total overflow: %v", err)
 		}
 	}
 }
