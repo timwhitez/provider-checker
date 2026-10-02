@@ -40,3 +40,20 @@ go test ./...
 ## Feature requests
 
 New providers should implement `checker.Checker` (and optionally `ModelLister`), register via `init()`, and document support in the README capability matrix.
+
+## Streaming probes
+
+Streaming PASS means that at least one complete, valid provider SSE event was
+received. It does not assert that a full answer finished. Clean EOF after valid
+progress is accepted without `[DONE]`; a later transport interruption or
+unfinished frame is accepted as `partial`, with the reason shown in the result.
+Explicit error events, malformed JSON in complete frames, and budget overruns
+always fail, even after valid progress. `[DONE]`, heartbeats, and arbitrary JSON
+alone do not prove streaming support. Models come from validated events (or
+explicit error responses); a terminal Responses event's model takes precedence.
+
+The small probe uses a 64 KiB physical SSE frame budget, a 1 MiB total body
+budget, and a 120 Unicode character snippet. These are probe limits, not general
+provider limits. Keep tests offline with local `httptest` fixtures; coverage in
+`checker/http_test.go` and `checker/upstream_model_test.go` includes framing,
+read boundaries, partial results, errors, budgets, and all four provider paths.

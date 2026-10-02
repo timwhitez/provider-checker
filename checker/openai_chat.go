@@ -77,14 +77,7 @@ func (c OpenAIChatChecker) Test(ctx context.Context, cfg Config, feature, prompt
 		if resp.StatusCode >= 400 {
 			return failHTTP("Streaming", start, resp)
 		}
-		n, snippet, model, err := readStream(resp.Body)
-		if err != nil {
-			return fail("Streaming", start, err)
-		}
-		if n == 0 {
-			return failMsg("Streaming", start, "no chunks received")
-		}
-		return passWithResponseModel("Streaming", start, fmt.Sprintf("%d chunks; %s", n, snippet), model)
+		return streamingResult(start, resp.Body, validChatStreamEvent)
 
 	case "vision":
 		body := map[string]any{
@@ -301,3 +294,16 @@ func decodeOAIChatText(r io.Reader) (string, error) {
 }
 
 func init() { register(OpenAIChatChecker{}) }
+
+func validChatStreamEvent(event string, value any) bool {
+	if event != "" && event != "message" {
+		return false
+	}
+	choices, _ := streamObject(value)["choices"].([]any)
+	for _, choice := range choices {
+		if streamObject(streamObject(choice)["delta"]) != nil {
+			return true
+		}
+	}
+	return false
+}
