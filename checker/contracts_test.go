@@ -104,6 +104,19 @@ func contractProbe(t *testing.T, typ, feature string, payload map[string]any) Fe
 			if format["strict"] != true || format["type"] != "json_schema" {
 				t.Errorf("schema format = %v", format)
 			}
+			schema, ok := format["schema"].(map[string]any)
+			if !ok || schema["type"] != "object" || schema["additionalProperties"] != false {
+				t.Errorf("schema object/additionalProperties contract = %v", schema)
+			}
+			required, ok := schema["required"].([]any)
+			if !ok || len(required) != 1 || required[0] != "ok" {
+				t.Errorf("schema required = %v, want [ok]", schema["required"])
+			}
+			properties, ok := schema["properties"].(map[string]any)
+			okProperty, isObject := properties["ok"].(map[string]any)
+			if !ok || len(properties) != 1 || !isObject || okProperty["type"] != "boolean" {
+				t.Errorf("schema properties = %v, want only ok:boolean", schema["properties"])
+			}
 		}
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(payload); err != nil {

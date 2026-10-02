@@ -50,7 +50,17 @@ Output: `provider-checker.exe` (embeds Common Controls 6 + DPI awareness via `re
 4. **Model** — required; or use **List models**  
 5. **Prompt / Timeout / Reasoning** — optional  
 6. Tick capabilities and click **Run Check**  
-7. Use **Stop**, **Export CSV**, **Clear**, and the **History** tab as needed  
+7. Use **Stop**, **Export CSV**, **Clear display**, and the **History** tab as needed
+
+**Clear display** clears the visible results, log and summary strip. Run records
+and persisted history counts retain every result, including cancellation skips,
+and the configuration captured when the run started. An in-progress run still
+shows its full summary on completion. CSV exports the currently visible table.
+Editing the form or loading history during a run configures the next run.
+Model listings are cancelled and discarded when connection settings change,
+history is loaded, a run starts, or the window closes; edits to the model name
+are preserved when a current listing arrives. Reasoning Mode is enabled only
+for the Responses API.
 
 For every completed probe, the result table, log, and CSV also show the raw
 **Upstream Model / 上游响应模型** declared by the provider response. This is
