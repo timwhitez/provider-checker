@@ -240,8 +240,15 @@ func TestStreamLeadingBOM(t *testing.T) {
 		}{
 			{"data first", "\ufeff" + chatStreamFixture, 1, false},
 			{"error event first", "\ufeffevent: error\ndata: {}\n\n" + chatStreamFixture, 0, true},
+			{"error payload first", "\ufeffdata: {\"error\":{\"message\":\"upstream failure\"}}\n\n" + chatStreamFixture, 0, true},
 		} {
 			t.Run(fmt.Sprintf("%s/chunks=%v", tc.name, chunks), func(t *testing.T) {
+				if tc.wantError {
+					result := streamingResult(time.Now(), &splitStreamReader{data: []byte(tc.body), sizes: chunks}, validChatStreamEvent)
+					if result.Status != StatusFail {
+						t.Fatalf("explicit error before valid Chat must fail: %+v", result)
+					}
+				}
 				got, err := readStream(&splitStreamReader{data: []byte(tc.body), sizes: chunks}, validChatStreamEvent)
 				if got.Events != tc.wantEvents || (err != nil) != tc.wantError {
 					t.Fatalf("result=%+v error=%v; want events=%d error=%v", got, err, tc.wantEvents, tc.wantError)

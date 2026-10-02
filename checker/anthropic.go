@@ -143,7 +143,7 @@ func (c AnthropicChecker) Test(ctx context.Context, cfg Config, feature, prompt 
 	case "max_tokens":
 		body := map[string]any{
 			"model":      cfg.Model,
-			"max_tokens": 5,
+			"max_tokens": probeTokenBudget,
 			"messages":   []map[string]string{{"role": "user", "content": "Count from 1 to 100."}},
 		}
 		resp, err := doAnthropicJSON(ctx, cfg, http.MethodPost, base+"/messages", body)
@@ -156,21 +156,27 @@ func (c AnthropicChecker) Test(ctx context.Context, cfg Config, feature, prompt 
 		}
 		var r struct {
 			Content []struct {
+				Type string `json:"type"`
 				Text string `json:"text"`
 			} `json:"content"`
 			StopReason string `json:"stop_reason"`
 			Usage      struct {
-				OutputTokens int `json:"output_tokens"`
+				OutputTokens *int `json:"output_tokens"`
 			} `json:"usage"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-			return fail("Max Tokens", start, err)
+			return failResponseMsg("Max Tokens", start, err.Error(), resp)
 		}
 		text := ""
-		if len(r.Content) > 0 {
-			text = r.Content[0].Text
+		for _, block := range r.Content {
+			if block.Type == "text" {
+				text += block.Text
+			}
 		}
-		return passResponse("Max Tokens", start, fmt.Sprintf("content=%q output_tokens=%d stop_reason=%s", text, r.Usage.OutputTokens, r.StopReason), resp)
+		if msg := tokenBudgetAssertion(text, r.Usage.OutputTokens); msg != "" {
+			return failResponseMsg("Max Tokens", start, msg, resp)
+		}
+		return passResponse("Max Tokens", start, fmt.Sprintf("content=%q output_tokens=%d stop_reason=%s; reported usage within requested limit", text, *r.Usage.OutputTokens, r.StopReason), resp)
 
 	case "system":
 		body := map[string]any{
@@ -189,10 +195,13 @@ func (c AnthropicChecker) Test(ctx context.Context, cfg Config, feature, prompt 
 		}
 		text, err := decodeAnthropicText(resp.Body)
 		if err != nil {
-			return fail("System Prompt", start, err)
+			return failResponseMsg("System Prompt", start, err.Error(), resp)
 		}
 		if text == "" {
 			return failResponseMsg("System Prompt", start, "empty content", resp)
+		}
+		if msg := systemAssertion(text); msg != "" {
+			return failResponseMsg("System Prompt", start, msg, resp)
 		}
 		return passResponse("System Prompt", start, text, resp)
 	}
@@ -264,12 +273,13 @@ func decodeAnthropicText(rd io.Reader) (string, error) {
 	if err := json.NewDecoder(rd).Decode(&v); err != nil {
 		return "", err
 	}
+	var text string
 	for _, b := range v.Content {
-		if b.Type == "text" && b.Text != "" {
-			return b.Text, nil
+		if b.Type == "text" {
+			text += b.Text
 		}
 	}
-	return "", nil
+	return text, nil
 }
 
 func init() { register(AnthropicChecker{}) }
