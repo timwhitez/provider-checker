@@ -74,6 +74,19 @@ History is stored under the user config dir: `provider-checker/history.json` (ma
 
 Vision probes use an embedded 1×1 PNG (data URI / base64), not an external image host.
 
+Reasoning effort is sent consistently for every supported OpenAI probe; mode is
+only sent to Responses. Empty settings are omitted, and Anthropic/Gemini do not
+receive OpenAI reasoning fields. Support for particular values depends on the
+upstream model; rejected parameters retain the provider's HTTP error.
+
+System probes require `PINEAPPLE` after trimming surrounding Unicode whitespace.
+Max Tokens probes require nonempty output and reported output usage within the
+requested budget of 5; normal early stopping is allowed. Missing usage fails
+with an explicit "cannot verify" explanation, rather than being treated as 0.
+Responses JSON probes validate the requested schema: an object containing only
+the required boolean `ok`. These checks use returned evidence, not a local token
+estimate or a guarantee about a provider's internal implementation.
+
 ## Tests
 
 ```bash

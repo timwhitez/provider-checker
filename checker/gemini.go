@@ -210,10 +210,13 @@ func (c GeminiChecker) Test(ctx context.Context, cfg Config, feature, prompt str
 		}
 		text, err := decodeGeminiText(resp.Body)
 		if err != nil {
-			return fail("System Instruction", start, err)
+			return failResponseMsg("System Instruction", start, err.Error(), resp)
 		}
 		if text == "" {
 			return failResponseMsg("System Instruction", start, "empty content", resp)
+		}
+		if msg := systemAssertion(text); msg != "" {
+			return failResponseMsg("System Instruction", start, msg, resp)
 		}
 		return passResponse("System Instruction", start, text, resp)
 	}
@@ -289,10 +292,12 @@ func decodeGeminiText(rd io.Reader) (string, error) {
 		return "", err
 	}
 	for _, c := range v.Candidates {
+		var text string
 		for _, p := range c.Content.Parts {
-			if p.Text != "" {
-				return p.Text, nil
-			}
+			text += p.Text
+		}
+		if text != "" {
+			return text, nil
 		}
 	}
 	return "", nil
