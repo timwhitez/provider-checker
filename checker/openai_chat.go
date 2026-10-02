@@ -69,6 +69,7 @@ func (c OpenAIChatChecker) Test(ctx context.Context, cfg Config, feature, prompt
 			"stream":      true,
 			"temperature": 0,
 		}
+		applyChatReasoning(body, cfg)
 		resp, err := postJSON(ctx, cfg, base+"/chat/completions", body, hdr)
 		if err != nil {
 			return fail("Streaming", start, err)
@@ -98,6 +99,7 @@ func (c OpenAIChatChecker) Test(ctx context.Context, cfg Config, feature, prompt
 			"max_tokens":  16,
 			"temperature": 0,
 		}
+		applyChatReasoning(body, cfg)
 		resp, err := postJSON(ctx, cfg, base+"/chat/completions", body, hdr)
 		if err != nil {
 			return fail("Vision", start, err)
@@ -135,6 +137,7 @@ func (c OpenAIChatChecker) Test(ctx context.Context, cfg Config, feature, prompt
 			"tool_choice": "auto",
 			"max_tokens":  128,
 		}
+		applyChatReasoning(body, cfg)
 		resp, err := postJSON(ctx, cfg, base+"/chat/completions", body, hdr)
 		if err != nil {
 			return fail("Tool Calling", start, err)
@@ -172,6 +175,7 @@ func (c OpenAIChatChecker) Test(ctx context.Context, cfg Config, feature, prompt
 			"max_tokens":      64,
 			"temperature":     0,
 		}
+		applyChatReasoning(body, cfg)
 		resp, err := postJSON(ctx, cfg, base+"/chat/completions", body, hdr)
 		if err != nil {
 			return fail("JSON Mode", start, err)
@@ -196,9 +200,10 @@ func (c OpenAIChatChecker) Test(ctx context.Context, cfg Config, feature, prompt
 		body := map[string]any{
 			"model":       cfg.Model,
 			"messages":    []map[string]string{{"role": "user", "content": "Count from 1 to 100."}},
-			"max_tokens":  5,
+			"max_tokens":  probeTokenBudget,
 			"temperature": 0,
 		}
+		applyChatReasoning(body, cfg)
 		resp, err := postJSON(ctx, cfg, base+"/chat/completions", body, hdr)
 		if err != nil {
 			return fail("Max Tokens", start, err)
@@ -215,17 +220,20 @@ func (c OpenAIChatChecker) Test(ctx context.Context, cfg Config, feature, prompt
 				FinishReason string `json:"finish_reason"`
 			} `json:"choices"`
 			Usage struct {
-				CompletionTokens int `json:"completion_tokens"`
+				CompletionTokens *int `json:"completion_tokens"`
 			} `json:"usage"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
-			return fail("Max Tokens", start, err)
+			return failResponseMsg("Max Tokens", start, err.Error(), resp)
 		}
 		if len(r.Choices) == 0 {
 			return failResponseMsg("Max Tokens", start, "no choices in response", resp)
 		}
-		return passResponse("Max Tokens", start, fmt.Sprintf("content=%q completion_tokens=%d finish_reason=%s",
-			r.Choices[0].Message.Content, r.Usage.CompletionTokens, r.Choices[0].FinishReason), resp)
+		if msg := tokenBudgetAssertion(r.Choices[0].Message.Content, r.Usage.CompletionTokens); msg != "" {
+			return failResponseMsg("Max Tokens", start, msg, resp)
+		}
+		return passResponse("Max Tokens", start, fmt.Sprintf("content=%q completion_tokens=%d finish_reason=%s; reported usage within requested limit",
+			r.Choices[0].Message.Content, *r.Usage.CompletionTokens, r.Choices[0].FinishReason), resp)
 
 	case "system":
 		body := map[string]any{
@@ -237,6 +245,7 @@ func (c OpenAIChatChecker) Test(ctx context.Context, cfg Config, feature, prompt
 			"max_tokens":  32,
 			"temperature": 0,
 		}
+		applyChatReasoning(body, cfg)
 		resp, err := postJSON(ctx, cfg, base+"/chat/completions", body, hdr)
 		if err != nil {
 			return fail("System Prompt", start, err)
@@ -247,10 +256,13 @@ func (c OpenAIChatChecker) Test(ctx context.Context, cfg Config, feature, prompt
 		}
 		txt, err := decodeOAIChatText(resp.Body)
 		if err != nil {
-			return fail("System Prompt", start, err)
+			return failResponseMsg("System Prompt", start, err.Error(), resp)
 		}
 		if txt == "" {
 			return failResponseMsg("System Prompt", start, "no content in response", resp)
+		}
+		if msg := systemAssertion(txt); msg != "" {
+			return failResponseMsg("System Prompt", start, msg, resp)
 		}
 		return passResponse("System Prompt", start, txt, resp)
 	}

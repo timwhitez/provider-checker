@@ -241,7 +241,7 @@ func main() {
 								}},
 							PushButton{AssignTo: &btnExport, Text: "\U0001F4BE  Export CSV", Font: fontUI, MinSize: Size{Width: 120, Height: 32},
 								OnClicked: func() { exportCSV(u.mw, u.resultsModel.snapshot()) }},
-							PushButton{AssignTo: &btnClear, Text: "Clear display", ToolTipText: "Clears the visible table/log only; run summary and history retain all results. CSV exports the visible table.", Font: fontUI, MinSize: Size{Width: 90, Height: 32},
+							PushButton{AssignTo: &btnClear, Text: "Clear display", ToolTipText: "Clears the visible table/log/summary; run records and history counts retain all results. CSV exports the visible table.", Font: fontUI, MinSize: Size{Width: 90, Height: 32},
 								OnClicked: func() {
 									u.resultsModel.reset()
 									if u.teLog != nil {

@@ -52,9 +52,10 @@ Output: `provider-checker.exe` (embeds Common Controls 6 + DPI awareness via `re
 6. Tick capabilities and click **Run Check**  
 7. Use **Stop**, **Export CSV**, **Clear display**, and the **History** tab as needed
 
-**Clear display** clears the visible results and log. Completed summaries and
-history retain every result from the run, including cancellation skips, and the
-configuration captured when it started. CSV exports the currently visible table.
+**Clear display** clears the visible results, log and summary strip. Run records
+and persisted history counts retain every result, including cancellation skips,
+and the configuration captured when the run started. An in-progress run still
+shows its full summary on completion. CSV exports the currently visible table.
 Editing the form or loading history during a run configures the next run.
 Model listings are cancelled and discarded when connection settings change,
 history is loaded, a run starts, or the window closes; edits to the model name
@@ -82,6 +83,19 @@ History is stored under the user config dir: `provider-checker/history.json` (ma
 | system | System prompt | ✓ | ✗ | ✓ | ✓ |
 
 Vision probes use an embedded 1×1 PNG (data URI / base64), not an external image host.
+
+Reasoning effort is sent consistently for every supported OpenAI probe; mode is
+only sent to Responses. Empty settings are omitted, and Anthropic/Gemini do not
+receive OpenAI reasoning fields. Support for particular values depends on the
+upstream model; rejected parameters retain the provider's HTTP error.
+
+System probes require `PINEAPPLE` after trimming surrounding Unicode whitespace.
+Max Tokens probes require nonempty output and reported output usage within the
+requested budget of 5; normal early stopping is allowed. Missing usage fails
+with an explicit "cannot verify" explanation, rather than being treated as 0.
+Responses JSON probes validate the requested schema: an object containing only
+the required boolean `ok`. These checks use returned evidence, not a local token
+estimate or a guarantee about a provider's internal implementation.
 
 ## Tests
 
