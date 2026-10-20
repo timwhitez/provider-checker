@@ -3,7 +3,6 @@ package checker
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -127,6 +126,19 @@ func TestResponsesCompletionMatrixBasic(t *testing.T) {
 			mutate:  func(b map[string]any) { b["status"] = "cancelled" },
 			want:    StatusFail,
 			wantErr: []string{"provider error", "status=cancelled"},
+		},
+		{
+			name:    "single-l canceled spelling is explicit failure",
+			mutate:  func(b map[string]any) { b["status"] = "canceled" },
+			want:    StatusFail,
+			wantErr: []string{"provider error", "status=canceled"},
+		},
+		{
+			name:    "padded status is unrecognized, not failed",
+			mutate:  func(b map[string]any) { b["status"] = " failed" },
+			want:    StatusFail,
+			wantErr: []string{"[unrecognized_status: failed", "completion_verified=false"},
+			banned:  []string{"provider error"},
 		},
 		{
 			name: "error object wins over completed and valid output",
@@ -502,6 +514,35 @@ func TestResponsesLongUnrecognizedStatusInWindow(t *testing.T) {
 	}
 }
 
+// TestResponsesMultibyteQualifierInWindow pins the byte-budgeted qualifier:
+// even 40 CJK runes in an unknown reason keep completion_verified=false
+// within the first 80 bytes (issue #13 item 5).
+func TestResponsesMultibyteQualifierInWindow(t *testing.T) {
+	reason := strings.Repeat("因", 40)
+	payload, err := json.Marshal(map[string]any{
+		"model":              "declared-upstream",
+		"status":             "incomplete",
+		"incomplete_details": map[string]any{"reason": reason},
+		"output": []any{map[string]any{"type": "message", "content": []any{
+			map[string]any{"type": "output_text", "text": "Hello there"},
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, _ := responsesEnvelopeProbe(t, "basic", string(payload), Config{})
+	if result.Status != StatusPass {
+		t.Fatalf("limited pass lost: %+v", result)
+	}
+	logged := result.Detail
+	if len(logged) > 80 {
+		logged = logged[:80]
+	}
+	if !strings.Contains(logged, "completion_verified=false") {
+		t.Errorf("80-byte log window %q loses the qualifier tail", logged)
+	}
+}
+
 // TestResponsesPrefixVisibleInLogBudget checks the completion qualifier stays
 // within the first 80 bytes of Detail so the GUI log truncation keeps it
 // visible, including for long partial output (issue #13 item 5).
@@ -534,7 +575,7 @@ func TestResponsesPrefixVisibleInLogBudget(t *testing.T) {
 			t.Errorf("80-byte log view %q misses %q", logged, want)
 		}
 	}
-	if fmt.Sprint(result.Latency) == "" || result.Latency <= 0 {
+	if result.Latency <= 0 {
 		t.Errorf("latency lost: %v", result.Latency)
 	}
 }

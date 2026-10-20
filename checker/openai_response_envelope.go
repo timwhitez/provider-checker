@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"time"
+	"unicode/utf8"
 )
 
 // The synchronous Responses probes (basic/vision/tools/json) send a bounded
@@ -209,22 +210,24 @@ func responsesErrorDetail(raw json.RawMessage) (detail string, present bool, err
 	case code != "":
 		detail = fmt.Sprintf("code=%s", code)
 	default:
-		detail = "empty error object " + string(trimmed)
+		detail = "empty error object " + truncateBytes(string(trimmed), 120)
 	}
 	return detail, true, nil
 }
 
-// renderErrorField best-effort renders one error-object field as a string.
+// renderErrorField best-effort renders one error-object field as a string,
+// bounded like failHTTP's embedded body so a pathological provider cannot
+// balloon the in-memory result.
 func renderErrorField(raw json.RawMessage) string {
 	var s string
 	if json.Unmarshal(raw, &s) == nil {
-		return s
+		return truncateBytes(s, 512)
 	}
 	var n json.Number
 	if json.Unmarshal(raw, &n) == nil {
 		return n.String()
 	}
-	return string(raw)
+	return truncateBytes(string(raw), 512)
 }
 
 // responsesIncompleteReason extracts incomplete_details.reason. A missing or
@@ -251,6 +254,14 @@ func responsesIncompleteReason(raw json.RawMessage) (string, error) {
 	return reason, nil
 }
 
+// The GUI log shows the first 80 bytes of Detail/Error. Provider-supplied
+// qualifier values are byte-budgeted so the whole prefix, including the
+// completion_verified=false tail, stays inside that window.
+const (
+	incompleteValueBudget   = 80 - len("[incomplete:") - len(" completion_verified=false]")
+	unrecognizedValueBudget = 80 - len("[unrecognized_status:") - len(" completion_verified=false]")
+)
+
 // completionPrefix returns the compact completion qualifier placed at the
 // very start of Detail/Error so the 80-byte log truncation keeps it visible.
 // It is "" for a normally completed response.
@@ -265,14 +276,14 @@ func completionPrefix(c responsesCompletion) string {
 		case c.reason == "":
 			return "[incomplete:reason_missing completion_verified=false]"
 		default:
-			return "[incomplete:" + truncateRunes(c.reason, 40) + " completion_verified=false]"
+			return "[incomplete:" + truncateBytes(c.reason, incompleteValueBudget) + " completion_verified=false]"
 		}
 	case responsesNonterminal:
 		return "[nonterminal:" + c.status + " completion_verified=false]"
 	case responsesStatusUnavailable:
 		return "[completion_status_unavailable completion_verified=false]"
 	case responsesStatusUnrecognized:
-		return "[unrecognized_status:" + truncateRunes(c.status, 32) + " completion_verified=false]"
+		return "[unrecognized_status:" + truncateBytes(c.status, unrecognizedValueBudget) + " completion_verified=false]"
 	}
 	return ""
 }
@@ -283,6 +294,20 @@ func truncateRunes(s string, limit int) string {
 		return string(runes[:limit])
 	}
 	return s
+}
+
+// truncateBytes cuts s to at most limit bytes without splitting a rune, so a
+// qualifier built from provider-supplied multibyte values still fits the GUI
+// log's byte-based 80-byte window (issue #13 item 5).
+func truncateBytes(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
 }
 
 // responsesDiag records what the probe actually sent: the output cap and the
