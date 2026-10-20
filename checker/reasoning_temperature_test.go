@@ -16,7 +16,7 @@ import (
 // for every other explicit effort (issue #12).
 func TestChatProbeTemperatureContract(t *testing.T) {
 	for _, feature := range AllCheckers["openai-chat"].Supported() {
-		for _, effort := range []string{"", "none", "low", "high", "xhigh", "max"} {
+		for _, effort := range []string{"", "none", "low", "medium", "high", "xhigh", "max"} {
 			t.Run(feature+"/"+effortName(effort), func(t *testing.T) {
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					var body map[string]any
