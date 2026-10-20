@@ -225,7 +225,7 @@ func renderErrorField(raw json.RawMessage) string {
 	}
 	var n json.Number
 	if json.Unmarshal(raw, &n) == nil {
-		return n.String()
+		return truncateBytes(n.String(), 512)
 	}
 	return truncateBytes(string(raw), 512)
 }
