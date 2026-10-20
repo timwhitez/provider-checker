@@ -109,7 +109,9 @@ func (s *Store) Records() []Record {
 	return out
 }
 
-// Add prepends a record, trims to maxRecords, and persists to disk.
+// Add prepends a record, trims to maxRecords, and persists to disk. The
+// in-memory list is updated only after the on-disk replace succeeds, so a
+// failed write leaves both memory and disk at the last committed state.
 func (s *Store) Add(r Record) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -117,36 +119,66 @@ func (s *Store) Add(r Record) error {
 		r.Time = time.Now()
 	}
 	// Newest first.
-	s.records = append([]Record{r}, s.records...)
-	if len(s.records) > maxRecords {
-		s.records = s.records[:maxRecords]
+	candidate := append([]Record{r}, s.records...)
+	if len(candidate) > maxRecords {
+		candidate = candidate[:maxRecords]
 	}
-	return s.saveLocked()
+	if err := s.commitLocked(candidate); err != nil {
+		return err
+	}
+	s.records = candidate
+	return nil
 }
 
-// Clear removes all records and persists the empty store.
+// Clear removes all records and persists the empty store, again committing
+// memory only after the on-disk replace succeeded.
 func (s *Store) Clear() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if err := s.commitLocked(nil); err != nil {
+		return err
+	}
 	s.records = nil
-	return s.saveLocked()
+	return nil
 }
 
-// saveLocked persists the current records. Caller must hold s.mu.
-func (s *Store) saveLocked() error {
+// commitLocked persists candidate records through an exclusive temp file and
+// an atomic rename. Each operation owns its temp file, so concurrent
+// operations cannot clobber each other's candidate; on failure the temp file
+// is removed and the last committed state remains on disk and in memory.
+// Caller must hold s.mu.
+func (s *Store) commitLocked(candidate []Record) error {
 	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
 		return err
 	}
-	b, err := json.MarshalIndent(s.records, "", "  ")
+	b, err := json.MarshalIndent(candidate, "", "  ")
 	if err != nil {
 		return err
 	}
-	// Atomic-ish write: temp file + rename.
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	tmp, err := os.CreateTemp(filepath.Dir(s.path), filepath.Base(s.path)+".tmp-")
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.path)
+	committed := false
+	defer func() {
+		if !committed {
+			tmp.Close()
+			os.Remove(tmp.Name())
+		}
+	}()
+	if _, err := tmp.Write(b); err != nil {
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	// Replace the store file atomically; os.Rename over an existing file is
+	// supported on both Unix and Windows (MoveFileEx REPLACE_EXISTING).
+	if err := os.Rename(tmp.Name(), s.path); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }
 
 func itoa(n int) string {

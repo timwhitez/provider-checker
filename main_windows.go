@@ -11,7 +11,6 @@ import (
 	"time"
 
 	"provider-checker/checker"
-	"provider-checker/history"
 	"provider-checker/runner"
 
 	"github.com/lxn/walk"
@@ -73,7 +72,7 @@ type appState struct {
 	running     bool
 	cancel      context.CancelFunc
 	results     []checker.FeatureResult
-	store       *history.Store
+	stores      *storeInit // shared, publish-once history store initialization
 	listing     modelListing
 }
 
@@ -81,6 +80,7 @@ func main() {
 	st := &appState{
 		providerKey: checker.ProviderTypes()[0],
 		features:    map[string]bool{},
+		stores:      newStoreInit(),
 	}
 	// Default-select Basic for convenience.
 	st.features["basic"] = true
@@ -371,18 +371,14 @@ func main() {
 	refreshStatus(u.sbiStatus, st)
 
 	// Load history in the background so the window can paint immediately.
+	// The coordinator publishes the store before this goroutine asks the UI
+	// thread for anything, so a concurrent save waits for (and shares) this
+	// initialization instead of racing a second Store (issue #11).
 	go func() {
-		path, err := history.DefaultPath()
-		if err != nil {
+		store := st.stores.ensure(openHistoryStore)
+		if store == nil {
 			return
 		}
-		store, oerr := history.Open(path)
-		if oerr != nil {
-			return
-		}
-		st.mu.Lock()
-		st.store = store
-		st.mu.Unlock()
 		if u.mw != nil {
 			u.mw.Synchronize(func() {
 				u.historyModel.setRecords(store.Records())
@@ -705,22 +701,14 @@ func startRun(u *uiRefs, st *appState) {
 }
 
 // saveHistory records the completed run and refreshes the history table.
+// The shared initialization replaces the old late-open fallback: the first
+// save waits for the background load and writes through the same store, so a
+// late background publish can no longer drop an already saved record
+// (issue #11).
 func saveHistory(u *uiRefs, st *appState, record *runRecord) {
-	st.mu.Lock()
-	store := st.store
-	st.mu.Unlock()
+	store := st.stores.ensure(openHistoryStore)
 	if store == nil {
-		// Late-open fallback if background load has not finished yet.
-		if path, err := history.DefaultPath(); err == nil {
-			if s, oerr := history.Open(path); oerr == nil {
-				st.mu.Lock()
-				st.store = s
-				store = s
-				st.mu.Unlock()
-			}
-		}
-	}
-	if store == nil {
+		appendLog(u.teLog, "history unavailable: store initialization failed; will retry on next save")
 		return
 	}
 	rec := record.historyRecord(time.Now(), encryptAPIKey(u, record.cfg.APIKey))
@@ -733,9 +721,7 @@ func saveHistory(u *uiRefs, st *appState, record *runRecord) {
 
 // reloadHistory reloads records from the store into the table.
 func reloadHistory(u *uiRefs, st *appState) {
-	st.mu.Lock()
-	store := st.store
-	st.mu.Unlock()
+	store := st.stores.ensure(openHistoryStore)
 	if store == nil {
 		return
 	}
@@ -744,9 +730,7 @@ func reloadHistory(u *uiRefs, st *appState) {
 
 // clearHistory empties the store after confirmation.
 func clearHistory(u *uiRefs, st *appState) {
-	st.mu.Lock()
-	store := st.store
-	st.mu.Unlock()
+	store := st.stores.ensure(openHistoryStore)
 	if store == nil {
 		return
 	}
