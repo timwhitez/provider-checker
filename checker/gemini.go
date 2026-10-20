@@ -144,15 +144,20 @@ func (c GeminiChecker) Test(ctx context.Context, cfg Config, feature, prompt str
 		if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
 			return fail("Function Calling", start, err)
 		}
+		// Only the first functionCall part is selected and verified
+		// (tool-call-local-minimum/v1).
 		for _, cand := range r.Candidates {
 			for _, p := range cand.Content.Parts {
 				if p.FunctionCall.Name != "" {
 					ab, _ := json.Marshal(p.FunctionCall.Args)
-					return passResponse("Function Calling", start, fmt.Sprintf("%s(%s)", p.FunctionCall.Name, string(ab)), resp)
+					if msg := toolCallAssertion(p.FunctionCall.Name, string(ab)); msg != "" {
+						return failResponseMsg("Function Calling", start, msg, resp)
+					}
+					return passResponse("Function Calling", start, fmt.Sprintf("%s(%s) %s", p.FunctionCall.Name, string(ab), toolCallContractNote), resp)
 				}
 			}
 		}
-		return failResponseMsg("Function Calling", start, "no functionCall in response", resp)
+		return failResponseMsg("Function Calling", start, "no functionCall in response " + toolCallContractNote, resp)
 
 	case "json":
 		endpoint, err := geminiURL(base, cfg.Model, "generateContent", cfg.APIKey, false)

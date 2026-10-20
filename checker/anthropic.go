@@ -132,13 +132,18 @@ func (c AnthropicChecker) Test(ctx context.Context, cfg Config, feature, prompt 
 		if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
 			return fail("Tool Use", start, err)
 		}
+		// Only the first tool_use block is selected and verified
+		// (tool-call-local-minimum/v1).
 		for _, b := range r.Content {
 			if b.Type == "tool_use" {
 				ib, _ := json.Marshal(b.Input)
-				return passResponse("Tool Use", start, fmt.Sprintf("%s(%s)", b.Name, string(ib)), resp)
+				if msg := toolCallAssertion(b.Name, string(ib)); msg != "" {
+					return failResponseMsg("Tool Use", start, msg, resp)
+				}
+				return passResponse("Tool Use", start, fmt.Sprintf("%s(%s) %s", b.Name, string(ib), toolCallContractNote), resp)
 			}
 		}
-		return failResponseMsg("Tool Use", start, "no tool_use block in content", resp)
+		return failResponseMsg("Tool Use", start, "no tool_use block in content " + toolCallContractNote, resp)
 
 	case "max_tokens":
 		body := map[string]any{
