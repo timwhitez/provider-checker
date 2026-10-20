@@ -48,7 +48,8 @@ func (s *storeInit) get() *history.Store {
 // ensure waits for any in-flight attempt and returns the published store,
 // performing at most one open attempt itself when none has succeeded and none
 // is running. It returns nil when the attempt it waited for (or made) failed;
-// the next call will retry.
+// the next call will retry. open must not call back into ensure (it would
+// self-deadlock waiting for its own attempt).
 func (s *storeInit) ensure(open func() (*history.Store, error)) *history.Store {
 	s.mu.Lock()
 	if s.store != nil {

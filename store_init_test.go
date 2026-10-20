@@ -35,7 +35,9 @@ func TestStoreInitSharesOneOpen(t *testing.T) {
 	open := func() (*history.Store, error) {
 		if opens.Add(1) == 1 {
 			close(started)
-			<-release // the background read of H0 pauses here
+			// The background initialization pauses BEFORE reading the old
+			// H0 snapshot from disk.
+			<-release
 		}
 		return history.Open(path)
 	}
@@ -86,6 +88,61 @@ func TestStoreInitSharesOneOpen(t *testing.T) {
 	}
 	if opens.Load() != 1 {
 		t.Fatalf("opens = %d after all saves, want one", opens.Load())
+	}
+}
+
+// TestStoreInitWaiterSharesInFlightAttempt pins the waiter branch directly:
+// with an attempt armed (white-box), a concurrent ensure must not open a
+// second store, must stay blocked until the attempt publishes, and must then
+// return the published store.
+func TestStoreInitWaiterSharesInFlightAttempt(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "history.json")
+	published, err := history.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	si := newStoreInit()
+	// Arm the coordinator as if a background attempt were in flight.
+	si.mu.Lock()
+	si.opening = true
+	attemptDone := make(chan struct{})
+	si.attemptDone = attemptDone
+	si.mu.Unlock()
+
+	var opens atomic.Int32
+	waiter := make(chan *history.Store, 1)
+	go func() {
+		waiter <- si.ensure(func() (*history.Store, error) {
+			opens.Add(1)
+			return nil, errors.New("waiter must share, not open")
+		})
+	}()
+
+	// Non-delivery probe (not a synchronization): a short observation window
+	// in which the waiter must not have returned, because the store is only
+	// published together with closing the attempt channel.
+	select {
+	case s := <-waiter:
+		t.Fatalf("waiter returned %+v before the in-flight attempt finished", s)
+	case <-time.After(20 * time.Millisecond):
+	}
+
+	si.mu.Lock()
+	si.store = published
+	close(attemptDone)
+	si.mu.Unlock()
+
+	select {
+	case s := <-waiter:
+		if s != published {
+			t.Fatalf("waiter got %p, want the published store %p", s, published)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("waiter did not wake after the attempt published")
+	}
+	if opens.Load() != 0 {
+		t.Fatalf("waiter opened independently: opens = %d", opens.Load())
 	}
 }
 

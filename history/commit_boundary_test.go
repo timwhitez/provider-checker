@@ -3,6 +3,7 @@ package history
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -91,6 +92,97 @@ func TestCommitUsesExclusiveTempFiles(t *testing.T) {
 	s2, _ := Open(path)
 	if err := s2.Add(rec("D", 2*time.Second)); err != nil {
 		t.Fatalf("Add through second store: %v", err)
+	}
+}
+
+// TestRawDoubleOpenLosesSavedRecord documents the pre-fix counterexample from
+// issue #11 with plain (uncoordinated) stores: two independent snapshots on
+// one path, with writes in the reverse order of their opens, silently drop
+// the first save. The GUI's storeInit coordinator exists to make this pairing
+// impossible; this test pins the library-level behavior it must prevent ever
+// being reached, and forces a conscious decision if Store ever gains
+// reconciliation semantics.
+func TestRawDoubleOpenLosesSavedRecord(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history.json")
+	seed, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := seed.Add(rec("H0", -3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	background, err := Open(path) // reads H0, then pauses (in the GUI: a goroutine)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := Open(path) // first save also reads H0
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := first.Add(rec("A", -time.Hour)); err != nil { // save A: disk H0,A
+		t.Fatal(err)
+	}
+	if err := background.Add(rec("B", 0)); err != nil { // late save B from the old snapshot: disk H0,B
+		t.Fatal(err)
+	}
+
+	fresh, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var models []string
+	for _, r := range fresh.Records() {
+		models = append(models, r.Model)
+	}
+	// A is gone: the exact data loss issue #11 describes.
+	if len(models) != 2 || models[0] != "B" || models[1] != "H0" {
+		t.Fatalf("records = %v, want the documented lost-update shape [B H0]", models)
+	}
+}
+
+// TestConcurrentCommitsKeepValidJSON smokes the temp-file exclusivity under
+// concurrency: parallel commits through stores sharing one path must always
+// leave a well-formed JSON array containing at least the winner's records.
+func TestConcurrentCommitsKeepValidJSON(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "history.json")
+	const stores = 4
+	const adds = 8
+	var wg sync.WaitGroup
+	for i := 0; i < stores; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			s, err := Open(path)
+			if err != nil {
+				t.Error(err)
+				return
+			}
+			for j := 0; j < adds; j++ {
+				if err := s.Add(rec(fmtModel(i*100+j), time.Duration(i*100+j)*time.Millisecond)); err != nil {
+					t.Error(err)
+					return
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+
+	fresh, err := Open(path)
+	if err != nil {
+		t.Fatalf("final file not a valid store: %v", err)
+	}
+	if len(fresh.Records()) == 0 {
+		t.Fatal("all concurrent commits lost")
+	}
+	entries, err := os.ReadDir(filepath.Dir(path))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if e.Name() != "history.json" {
+			t.Errorf("leftover temp file: %s", e.Name())
+		}
 	}
 }
 
