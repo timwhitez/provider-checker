@@ -200,7 +200,7 @@ func main() {
 								Model:        effortModel,
 								CurrentIndex: 0,
 								MinSize:      Size{Width: 180, Height: 0},
-								ToolTipText:  "OpenAI reasoning.effort（low/medium/high）。留空使用服务商默认（medium）。",
+								ToolTipText:  "OpenAI reasoning.effort（none/low/medium/high/xhigh/max）。留空时不发送该参数，实际默认由模型/服务商决定；显式选择（none 除外）时会省略探针的隐式 temperature。",
 							}),
 							mkField("Reasoning Mode / 推理模式", ComboBox{
 								AssignTo:     &u.cbMode,
