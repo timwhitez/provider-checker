@@ -85,9 +85,14 @@ History is stored under the user config dir: `provider-checker/history.json` (ma
 Vision probes use an embedded 1×1 PNG (data URI / base64), not an external image host.
 
 Reasoning effort is sent consistently for every supported OpenAI probe; mode is
-only sent to Responses. Empty settings are omitted, and Anthropic/Gemini do not
-receive OpenAI reasoning fields. Support for particular values depends on the
-upstream model; rejected parameters retain the provider's HTTP error.
+only sent to Responses. Empty settings are omitted (the effective default is
+decided by the model/provider, not fixed to medium), and Anthropic/Gemini do
+not receive OpenAI reasoning fields. When an explicit effort other than `none`
+is selected, Chat Completions probes omit their implicit `temperature=0` so the
+probe itself cannot be rejected for combining reasoning controls with sampling
+parameters; empty and `none` keep the legacy request shape. Support for
+particular values depends on the upstream model; rejected parameters retain
+the provider's HTTP error.
 
 System probes require `PINEAPPLE` after trimming surrounding Unicode whitespace.
 Max Tokens probes require nonempty output and reported output usage within the

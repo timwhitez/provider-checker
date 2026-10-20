@@ -24,7 +24,8 @@ type Config struct {
 }
 
 // ReasoningEfforts is the ordered set of selectable reasoning-effort values.
-// The empty first entry means "omit the field / provider default (medium)".
+// The empty first entry means the field is not sent at all; the effective
+// default is then decided by the model/provider, not by this app.
 // Values match the OpenAI reasoning guide: none, low, medium, high,
 // xhigh, max (support is model-dependent).
 var ReasoningEfforts = []string{"", "none", "low", "medium", "high", "xhigh", "max"}
@@ -156,10 +157,18 @@ func newReq(ctx context.Context, method, url string, body io.Reader) (*http.Requ
 	return http.NewRequestWithContext(ctx, method, url, body)
 }
 
-// applyChatReasoning adds the Chat Completions `reasoning_effort` field when set.
+// applyChatReasoning adds the Chat Completions `reasoning_effort` field when
+// set. Current OpenAI reasoning models may reject explicit sampling parameters
+// combined with reasoning controls, so an explicit effort (other than "none",
+// which disables reasoning) also removes the probes' implicit `temperature`.
+// Empty effort keeps the field omitted and the legacy `temperature` behavior.
 func applyChatReasoning(body map[string]any, cfg Config) {
-	if cfg.ReasoningEffort != "" {
-		body["reasoning_effort"] = cfg.ReasoningEffort
+	if cfg.ReasoningEffort == "" {
+		return
+	}
+	body["reasoning_effort"] = cfg.ReasoningEffort
+	if cfg.ReasoningEffort != "none" {
+		delete(body, "temperature")
 	}
 }
 
