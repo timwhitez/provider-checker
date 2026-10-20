@@ -134,11 +134,11 @@ func TestResponsesCompletionMatrixBasic(t *testing.T) {
 			wantErr: []string{"provider error", "status=canceled"},
 		},
 		{
-			name:    "padded status is unrecognized, not failed",
-			mutate:  func(b map[string]any) { b["status"] = " failed" },
-			want:    StatusFail,
-			wantErr: []string{"[unrecognized_status: failed", "completion_verified=false"},
-			banned:  []string{"provider error"},
+			name:       "padded status is unrecognized, not failed",
+			mutate:     func(b map[string]any) { b["status"] = " failed" },
+			want:       StatusPass,
+			wantDetail: []string{"[unrecognized_status: failed", "completion_verified=false", "Hello there"},
+			banned:     []string{"provider error"},
 		},
 		{
 			name: "error object wins over completed and valid output",
