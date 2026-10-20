@@ -155,7 +155,7 @@ func (c OpenAIChatChecker) Test(ctx context.Context, cfg Config, feature, prompt
 			return fail("Tool Calling", start, err)
 		}
 		if len(r.Choices) == 0 || len(r.Choices[0].Message.ToolCalls) == 0 {
-			return failResponseMsg("Tool Calling", start, "model did not emit a tool_call " + toolCallContractNote, resp)
+			return failResponseMsg("Tool Calling", start, "model did not emit a tool_call "+toolCallContractNote, resp)
 		}
 		// Only the first emitted call is selected and verified (tool-call-local-minimum/v1).
 		tc := r.Choices[0].Message.ToolCalls[0]

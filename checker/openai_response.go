@@ -145,7 +145,7 @@ func (c OpenAIResponseChecker) Test(ctx context.Context, cfg Config, feature, pr
 				return passResponse("Tool Calling", start, fmt.Sprintf("%s(%s) %s", o.Name, o.Args, toolCallContractNote), resp)
 			}
 		}
-		return failResponseMsg("Tool Calling", start, "no function_call in output " + toolCallContractNote, resp)
+		return failResponseMsg("Tool Calling", start, "no function_call in output "+toolCallContractNote, resp)
 
 	case "json":
 		body := map[string]any{

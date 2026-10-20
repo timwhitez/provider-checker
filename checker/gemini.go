@@ -157,7 +157,7 @@ func (c GeminiChecker) Test(ctx context.Context, cfg Config, feature, prompt str
 				}
 			}
 		}
-		return failResponseMsg("Function Calling", start, "no functionCall in response " + toolCallContractNote, resp)
+		return failResponseMsg("Function Calling", start, "no functionCall in response "+toolCallContractNote, resp)
 
 	case "json":
 		endpoint, err := geminiURL(base, cfg.Model, "generateContent", cfg.APIKey, false)

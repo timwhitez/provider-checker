@@ -143,7 +143,7 @@ func (c AnthropicChecker) Test(ctx context.Context, cfg Config, feature, prompt 
 				return passResponse("Tool Use", start, fmt.Sprintf("%s(%s) %s", b.Name, string(ib), toolCallContractNote), resp)
 			}
 		}
-		return failResponseMsg("Tool Use", start, "no tool_use block in content " + toolCallContractNote, resp)
+		return failResponseMsg("Tool Use", start, "no tool_use block in content "+toolCallContractNote, resp)
 
 	case "max_tokens":
 		body := map[string]any{

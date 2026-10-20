@@ -142,7 +142,9 @@ func TestToolCallLocalMinimumContract(t *testing.T) {
 			if result.Status != StatusFail {
 				t.Fatalf("%s: missing tool entry passed: %+v", typ, result)
 			}
-			if !strings.Contains(result.Error, "tool-call-local-minimum/v1") {
+			if !strings.Contains(result.Error, "tool-call-local-minimum/v1") ||
+				!strings.Contains(result.Error, "literal-local-minimum") ||
+				!strings.Contains(result.Error, "backend_effective_schema=not_checked") {
 				t.Errorf("%s: no-entry failure lacks contract annotation: %q", typ, result.Error)
 			}
 		})
