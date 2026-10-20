@@ -30,30 +30,42 @@ type responsesSyncOutput struct {
 	Type      string `json:"type"`
 	Name      string `json:"name"`
 	Arguments string `json:"arguments"`
-	Content   []struct {
-		Type string `json:"type"`
-		Text string `json:"text"`
-	} `json:"content"`
+	// Content stays raw so off-spec content on non-message items (which the
+	// legacy tools decoder ignored entirely) cannot break the whole decode;
+	// it is unmarshaled only for message items inside text().
+	Content json.RawMessage `json:"content"`
 }
 
 // text mirrors the previous decodeResponseText field preference: the
 // output_text shorthand first, then concatenated message/output_text parts.
-func (b *responsesSyncBody) text() string {
+// Malformed content on a message item is reported as a decode error, matching
+// the legacy whole-body decode failure.
+func (b *responsesSyncBody) text() (string, error) {
 	if b.OutputText != "" {
-		return b.OutputText
+		return b.OutputText, nil
 	}
 	var text string
 	for _, o := range b.Output {
 		if o.Type != "message" {
 			continue
 		}
-		for _, c := range o.Content {
+		if len(bytes.TrimSpace(o.Content)) == 0 {
+			continue
+		}
+		var parts []struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if err := json.Unmarshal(o.Content, &parts); err != nil {
+			return "", err
+		}
+		for _, c := range parts {
 			if c.Type == "output_text" {
 				text += c.Text
 			}
 		}
 	}
-	return text
+	return text, nil
 }
 
 // toolCall returns the first function_call output item, matching the tools
@@ -132,7 +144,7 @@ func classifyResponsesCompletion(b *responsesSyncBody) (responsesCompletion, err
 	var c responsesCompletion
 	status, kind := rawStringValue(b.Status)
 	if kind == rawBadType {
-		return c, fmt.Errorf("status: expected string, got %s", bytes.TrimSpace(b.Status))
+		return c, fmt.Errorf("status: expected string, got %s", truncateRunes(string(bytes.TrimSpace(b.Status)), 120))
 	}
 	errMsg, hasError, err := responsesErrorDetail(b.Error)
 	if err != nil {
@@ -180,7 +192,7 @@ func responsesErrorDetail(raw json.RawMessage) (detail string, present bool, err
 	}
 	var object map[string]json.RawMessage
 	if uerr := json.Unmarshal(trimmed, &object); uerr != nil || object == nil {
-		return "", false, fmt.Errorf("error: expected object, got %s", trimmed)
+		return "", false, fmt.Errorf("error: expected object, got %s", truncateRunes(string(trimmed), 120))
 	}
 	var code, message string
 	if field, ok := object["code"]; ok && !bytes.Equal(bytes.TrimSpace(field), []byte("null")) {
@@ -227,11 +239,11 @@ func responsesIncompleteReason(raw json.RawMessage) (string, error) {
 		Reason json.RawMessage `json:"reason"`
 	}
 	if err := json.Unmarshal(trimmed, &object); err != nil {
-		return "", fmt.Errorf("incomplete_details: expected object, got %s", trimmed)
+		return "", fmt.Errorf("incomplete_details: expected object, got %s", truncateRunes(string(trimmed), 120))
 	}
 	reason, kind := rawStringValue(object.Reason)
 	if kind == rawBadType {
-		return "", fmt.Errorf("incomplete_details.reason: expected string, got %s", bytes.TrimSpace(object.Reason))
+		return "", fmt.Errorf("incomplete_details.reason: expected string, got %s", truncateRunes(string(bytes.TrimSpace(object.Reason)), 120))
 	}
 	if kind != rawString {
 		return "", nil
@@ -260,7 +272,7 @@ func completionPrefix(c responsesCompletion) string {
 	case responsesStatusUnavailable:
 		return "[completion_status_unavailable completion_verified=false]"
 	case responsesStatusUnrecognized:
-		return "[unrecognized_status:" + truncateRunes(c.status, 40) + " completion_verified=false]"
+		return "[unrecognized_status:" + truncateRunes(c.status, 32) + " completion_verified=false]"
 	}
 	return ""
 }

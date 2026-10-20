@@ -10,6 +10,16 @@ import (
 // OpenAIResponseChecker tests the OpenAI /v1/responses endpoint (Responses API).
 type OpenAIResponseChecker struct{}
 
+// Output budgets of the synchronous probes; the same constants feed the
+// request body and the completion diagnostics so reports never drift from
+// what was actually sent (issue #13).
+const (
+	responsesBasicCap  = 64
+	responsesVisionCap = 16
+	responsesToolsCap  = 128
+	responsesJSONCap   = 64
+)
+
 func (OpenAIResponseChecker) Type() string { return "openai-response" }
 
 func (OpenAIResponseChecker) Supported() []string {
@@ -33,7 +43,7 @@ func (c OpenAIResponseChecker) Test(ctx context.Context, cfg Config, feature, pr
 		body := map[string]any{
 			"model":             cfg.Model,
 			"input":             prompt,
-			"max_output_tokens": 64,
+			"max_output_tokens": responsesBasicCap,
 		}
 		applyResponsesReasoning(body, cfg)
 		resp, err := postJSON(ctx, cfg, base+"/responses", body, hdr)
@@ -48,8 +58,12 @@ func (c OpenAIResponseChecker) Test(ctx context.Context, cfg Config, feature, pr
 		if derr != nil {
 			return failResponseMsg("Basic", start, "invalid Responses payload: "+derr.Error(), resp)
 		}
-		evidence := responsesEvidence{ok: env.text() != "", preview: env.text(), failMsg: "empty output text"}
-		return responsesProbeOutcome("Basic", start, resp, env, evidence, 64, cfg)
+		text, terr := env.text()
+		if terr != nil {
+			return failResponseMsg("Basic", start, "invalid Responses payload: "+terr.Error(), resp)
+		}
+		evidence := responsesEvidence{ok: text != "", preview: text, failMsg: "empty output text"}
+		return responsesProbeOutcome("Basic", start, resp, env, evidence, responsesBasicCap, cfg)
 
 	case "stream":
 		body := map[string]any{
@@ -78,7 +92,7 @@ func (c OpenAIResponseChecker) Test(ctx context.Context, cfg Config, feature, pr
 					{"type": "input_image", "image_url": redPNGDataURI},
 				}},
 			},
-			"max_output_tokens": 16,
+			"max_output_tokens": responsesVisionCap,
 		}
 		applyResponsesReasoning(body, cfg)
 		resp, err := postJSON(ctx, cfg, base+"/responses", body, hdr)
@@ -93,8 +107,12 @@ func (c OpenAIResponseChecker) Test(ctx context.Context, cfg Config, feature, pr
 		if derr != nil {
 			return failResponseMsg("Vision", start, "invalid Responses payload: "+derr.Error(), resp)
 		}
-		evidence := responsesEvidence{ok: env.text() != "", preview: env.text(), failMsg: "empty output text"}
-		return responsesProbeOutcome("Vision", start, resp, env, evidence, 16, cfg)
+		text, terr := env.text()
+		if terr != nil {
+			return failResponseMsg("Vision", start, "invalid Responses payload: "+terr.Error(), resp)
+		}
+		evidence := responsesEvidence{ok: text != "", preview: text, failMsg: "empty output text"}
+		return responsesProbeOutcome("Vision", start, resp, env, evidence, responsesVisionCap, cfg)
 
 	case "tools":
 		body := map[string]any{
@@ -108,7 +126,7 @@ func (c OpenAIResponseChecker) Test(ctx context.Context, cfg Config, feature, pr
 						"required":   []string{"city"},
 					}},
 			},
-			"max_output_tokens": 128,
+			"max_output_tokens": responsesToolsCap,
 		}
 		applyResponsesReasoning(body, cfg)
 		resp, err := postJSON(ctx, cfg, base+"/responses", body, hdr)
@@ -134,7 +152,7 @@ func (c OpenAIResponseChecker) Test(ctx context.Context, cfg Config, feature, pr
 				evidence.preview = fmt.Sprintf("%s(%s) %s", call.Name, call.Arguments, toolCallContractNote)
 			}
 		}
-		return responsesProbeOutcome("Tool Calling", start, resp, env, evidence, 128, cfg)
+		return responsesProbeOutcome("Tool Calling", start, resp, env, evidence, responsesToolsCap, cfg)
 
 	case "json":
 		body := map[string]any{
@@ -155,7 +173,7 @@ func (c OpenAIResponseChecker) Test(ctx context.Context, cfg Config, feature, pr
 					},
 				},
 			},
-			"max_output_tokens": 64,
+			"max_output_tokens": responsesJSONCap,
 		}
 		applyResponsesReasoning(body, cfg)
 		resp, err := postJSON(ctx, cfg, base+"/responses", body, hdr)
@@ -170,7 +188,10 @@ func (c OpenAIResponseChecker) Test(ctx context.Context, cfg Config, feature, pr
 		if derr != nil {
 			return failResponseMsg("JSON Mode", start, "invalid Responses payload: "+derr.Error(), resp)
 		}
-		text := env.text()
+		text, terr := env.text()
+		if terr != nil {
+			return failResponseMsg("JSON Mode", start, "invalid Responses payload: "+terr.Error(), resp)
+		}
 		evidence := responsesEvidence{failMsg: "empty output text"}
 		if text != "" {
 			if msg := okResultAssertion(text); msg != "" {
@@ -180,7 +201,7 @@ func (c OpenAIResponseChecker) Test(ctx context.Context, cfg Config, feature, pr
 				evidence.preview = text
 			}
 		}
-		return responsesProbeOutcome("JSON Mode", start, resp, env, evidence, 64, cfg)
+		return responsesProbeOutcome("JSON Mode", start, resp, env, evidence, responsesJSONCap, cfg)
 	}
 
 	return skip(feature)

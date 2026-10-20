@@ -458,6 +458,50 @@ func TestResponsesParseFailuresPreserveModel(t *testing.T) {
 	})
 }
 
+// TestResponsesToolsTolerateOffSpecContent keeps the legacy tools decode
+// tolerance: an off-spec content field on a function_call item must not break
+// the whole payload decode (the legacy tools decoder ignored it).
+func TestResponsesToolsTolerateOffSpecContent(t *testing.T) {
+	payload := `{"model":"declared-upstream","status":"completed","output":[{"type":"function_call","name":"get_weather","arguments":"{\"city\":\"Tokyo\"}","content":"off-spec"}]}`
+	result, requests := responsesEnvelopeProbe(t, "tools", payload, Config{})
+	if requests != 1 {
+		t.Errorf("requests = %d, want one", requests)
+	}
+	if result.Status != StatusPass {
+		t.Fatalf("off-spec content broke the tools probe: %+v", result)
+	}
+	if result.UpstreamResponseModel != "declared-upstream" {
+		t.Errorf("upstream model = %q", result.UpstreamResponseModel)
+	}
+}
+
+// TestResponsesLongUnrecognizedStatusInWindow keeps the whole completion
+// qualifier within the GUI log's first 80 bytes even for long status values.
+func TestResponsesLongUnrecognizedStatusInWindow(t *testing.T) {
+	longStatus := strings.Repeat("s", 60)
+	payload, err := json.Marshal(map[string]any{
+		"model":  "declared-upstream",
+		"status": longStatus,
+		"output": []any{map[string]any{"type": "message", "content": []any{
+			map[string]any{"type": "output_text", "text": "Hello there"},
+		}}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, _ := responsesEnvelopeProbe(t, "basic", string(payload), Config{})
+	if result.Status != StatusPass {
+		t.Fatalf("limited pass lost: %+v", result)
+	}
+	logged := result.Detail
+	if len(logged) > 80 {
+		logged = logged[:80]
+	}
+	if !strings.Contains(logged, "completion_verified=false") || !strings.Contains(logged, "unrecognized_status:") {
+		t.Errorf("80-byte log window %q loses the qualifier", logged)
+	}
+}
+
 // TestResponsesPrefixVisibleInLogBudget checks the completion qualifier stays
 // within the first 80 bytes of Detail so the GUI log truncation keeps it
 // visible, including for long partial output (issue #13 item 5).
