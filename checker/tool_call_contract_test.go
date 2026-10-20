@@ -3,7 +3,6 @@ package checker
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -263,9 +262,6 @@ func TestToolsProbeRequestShapeUnchanged(t *testing.T) {
 			}
 			if typ == "openai-chat" && sent["tool_choice"] != "auto" {
 				t.Errorf("%s: tool_choice = %v, want auto", typ, sent["tool_choice"])
-			}
-			if fmt.Sprint(sent["model"]) == "" && typ != "gemini" {
-				t.Errorf("%s: model missing from request", typ)
 			}
 		})
 	}

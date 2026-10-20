@@ -62,7 +62,7 @@ const toolCallContractVersion = "tool-call-local-minimum/v1"
 // single-turn call emission against the local minimum above. Extra argument
 // properties, other cities and an empty city string are valid under this
 // local contract even where a backend-effective schema would reject them.
-const toolCallContractNote = "[tool-call-local-minimum/v1 literal-local-minimum backend_effective_schema=not_checked]"
+const toolCallContractNote = "[" + toolCallContractVersion + " literal-local-minimum backend_effective_schema=not_checked]"
 
 // toolCallAssertion checks the selected tool call against the literal local
 // minimum declared by the probes (get_weather with a string city argument).
