@@ -135,12 +135,17 @@ func (c OpenAIResponseChecker) Test(ctx context.Context, cfg Config, feature, pr
 		if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
 			return fail("Tool Calling", start, err)
 		}
+		// Only the first function_call item is selected and verified
+		// (tool-call-local-minimum/v1).
 		for _, o := range r.Output {
 			if o.Type == "function_call" {
-				return passResponse("Tool Calling", start, fmt.Sprintf("%s(%s)", o.Name, o.Args), resp)
+				if msg := toolCallAssertion(o.Name, o.Args); msg != "" {
+					return failResponseMsg("Tool Calling", start, msg, resp)
+				}
+				return passResponse("Tool Calling", start, fmt.Sprintf("%s(%s) %s", o.Name, o.Args, toolCallContractNote), resp)
 			}
 		}
-		return failResponseMsg("Tool Calling", start, "no function_call in output", resp)
+		return failResponseMsg("Tool Calling", start, "no function_call in output "+toolCallContractNote, resp)
 
 	case "json":
 		body := map[string]any{

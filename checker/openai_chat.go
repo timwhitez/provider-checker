@@ -155,10 +155,14 @@ func (c OpenAIChatChecker) Test(ctx context.Context, cfg Config, feature, prompt
 			return fail("Tool Calling", start, err)
 		}
 		if len(r.Choices) == 0 || len(r.Choices[0].Message.ToolCalls) == 0 {
-			return failResponseMsg("Tool Calling", start, "model did not emit a tool_call", resp)
+			return failResponseMsg("Tool Calling", start, "model did not emit a tool_call "+toolCallContractNote, resp)
 		}
+		// Only the first emitted call is selected and verified (tool-call-local-minimum/v1).
 		tc := r.Choices[0].Message.ToolCalls[0]
-		return passResponse("Tool Calling", start, fmt.Sprintf("%s(%s)", tc.Function.Name, tc.Function.Arguments), resp)
+		if msg := toolCallAssertion(tc.Function.Name, tc.Function.Arguments); msg != "" {
+			return failResponseMsg("Tool Calling", start, msg, resp)
+		}
+		return passResponse("Tool Calling", start, fmt.Sprintf("%s(%s) %s", tc.Function.Name, tc.Function.Arguments, toolCallContractNote), resp)
 
 	case "json":
 		body := map[string]any{
