@@ -4,7 +4,9 @@ package main
 
 import (
 	"context"
+	"encoding/csv"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -349,6 +351,42 @@ func TestMacStopCancelsRunAndRecordsSkips(t *testing.T) {
 	rec := a.records[0]
 	if rec.Pass != 1 || rec.Skip != 2 || rec.APIKeyEnc != "" {
 		t.Fatalf("cancelled record %+v", rec)
+	}
+}
+
+func TestMacExportCSV(t *testing.T) {
+	withChecker(t, "openai-chat", scriptedChecker{entered: make(chan struct{})})
+	a, v := newTestApp(t)
+	clickCheck(a, v, "tools", true)
+	v.text[wModel] = "m1"
+	a.handleEvent(wRun, evAction)
+	v.pump(t, func() bool { return v.lastAlert() == "Check Complete" })
+
+	// Cancelling the save panel writes nothing and shows nothing.
+	alerts := len(v.alerts)
+	a.handleEvent(wExport, evAction)
+	if len(v.alerts) != alerts {
+		t.Fatal("cancelled save panel showed an alert")
+	}
+
+	v.savePath = filepath.Join(t.TempDir(), "out.csv")
+	a.handleEvent(wExport, evAction)
+	if v.lastAlert() != "Exported" {
+		t.Fatalf("alert = %q", v.lastAlert())
+	}
+	data, err := os.ReadFile(v.savePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := csv.NewReader(strings.NewReader(string(data))).ReadAll()
+	if err != nil || len(rows) != 3 || rows[1][1] != "PASS" || rows[2][1] != "FAIL" || rows[1][3] != "m1-2026" {
+		t.Fatalf("csv rows %v, %v", rows, err)
+	}
+
+	v.savePath = filepath.Join(t.TempDir(), "missing-dir", "out.csv")
+	a.handleEvent(wExport, evAction)
+	if v.lastAlert() != "Export failed" {
+		t.Fatalf("alert = %q", v.lastAlert())
 	}
 }
 

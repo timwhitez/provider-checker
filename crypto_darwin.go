@@ -45,6 +45,13 @@ static int pcKeychainGet(const char *service, const char *account, void **out, i
 	return 0;
 }
 
+static int pcKeychainDelete(const char *service, const char *account) {
+	CFMutableDictionaryRef q = pcKeychainQuery(service, account);
+	OSStatus status = SecItemDelete(q);
+	CFRelease(q);
+	return (int)status;
+}
+
 static int pcKeychainAdd(const char *service, const char *account, const char *label, const void *data, int len) {
 	CFMutableDictionaryRef q = pcKeychainQuery(service, account);
 	CFDataRef d = CFDataCreate(NULL, (const UInt8 *)data, len);
@@ -87,11 +94,14 @@ import (
 // sealed with it (see secret_seal.go). Nothing is written in plaintext and the
 // key never leaves the Keychain except in this process's memory.
 
-const (
+// The Keychain item identity. Variables only so tests can use a throwaway item.
+var (
 	keychainService = "io.github.timwhitez.provider-checker"
 	keychainAccount = "history-api-key-encryption"
 	keychainLabel   = "Provider Checker history key"
+)
 
+const (
 	errSecItemNotFound  = -25300
 	errSecDuplicateItem = -25299
 )
@@ -134,6 +144,17 @@ func keychainAdd(data []byte) int {
 	defer C.free(unsafe.Pointer(acc))
 	defer C.free(unsafe.Pointer(label))
 	return int(C.pcKeychainAdd(svc, acc, label, unsafe.Pointer(&data[0]), C.int(len(data))))
+}
+
+// keychainDelete removes the item; a missing item is not an error.
+func keychainDelete() error {
+	svc, acc := C.CString(keychainService), C.CString(keychainAccount)
+	defer C.free(unsafe.Pointer(svc))
+	defer C.free(unsafe.Pointer(acc))
+	if status := int(C.pcKeychainDelete(svc, acc)); status != 0 && status != errSecItemNotFound {
+		return keychainError{op: "delete", status: status}
+	}
+	return nil
 }
 
 // historyKey returns the Keychain-held sealing key, creating it on first use
