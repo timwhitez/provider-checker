@@ -3,50 +3,14 @@
 package main
 
 import (
-	"encoding/csv"
 	"errors"
-	"github.com/lxn/walk"
-	. "github.com/lxn/walk/declarative"
-	"github.com/lxn/win"
-	"os"
-	"path/filepath"
 	"runtime"
 	"testing"
 
-	"provider-checker/checker"
+	"github.com/lxn/walk"
+	. "github.com/lxn/walk/declarative"
+	"github.com/lxn/win"
 )
-
-func TestWriteResultsCSVIncludesUpstreamResponseModel(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "results.csv")
-	results := []checker.FeatureResult{{
-		Name:                  "Basic",
-		Status:                checker.StatusPass,
-		UpstreamResponseModel: "gpt-5.2-2026-01-15",
-		Detail:                "hello",
-	}}
-	if err := writeResultsCSV(path, results); err != nil {
-		t.Fatal(err)
-	}
-
-	f, err := os.Open(path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	rows, err := csv.NewReader(f).ReadAll()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(rows) != 2 {
-		t.Fatalf("row count = %d, want 2", len(rows))
-	}
-	if got := rows[0][3]; got != "UpstreamResponseModel" {
-		t.Fatalf("header = %q, want UpstreamResponseModel", got)
-	}
-	if got := rows[1][3]; got != "gpt-5.2-2026-01-15" {
-		t.Fatalf("upstream response model = %q", got)
-	}
-}
 
 func TestCapabilityWidgetsSynchronizeSelection(t *testing.T) {
 	runtime.LockOSThread()

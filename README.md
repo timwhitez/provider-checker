@@ -1,10 +1,10 @@
 # LLM Provider Checker
 
-Windows GUI tool for verifying LLM provider availability and capabilities.
+Desktop GUI tool (Windows and macOS) for verifying LLM provider availability and capabilities.
 
 Fill in Base URL, API Key, and Model, pick a provider type and the capabilities to probe, then click **Run Check**. Results, logs, and reloadable history appear in tabs.
 
-中文：一个 Windows 桌面工具，用于检测不同 LLM Provider 的可用性与能力（基础对话、流式、视觉、工具调用、JSON、Token 上限、系统提示等）。
+中文：一个 Windows / macOS 桌面工具，用于检测不同 LLM Provider 的可用性与能力（基础对话、流式、视觉、工具调用、JSON、Token 上限、系统提示等）。
 
 ## Features
 
@@ -13,16 +13,17 @@ Fill in Base URL, API Key, and Model, pick a provider type and the capabilities 
 - List models from provider `/models` endpoints
 - Reasoning effort / mode for OpenAI-style APIs
 - CSV export of results
-- History (config reload; API keys encrypted with Windows DPAPI)
+- History (config reload; API keys encrypted with Windows DPAPI / a macOS Keychain key)
 - Pure-Go Windows GUI via [`lxn/walk`](https://github.com/lxn/walk) (no CGO)
+- Native macOS GUI via AppKit (cgo, no third-party dependencies), with light/dark mode and a universal app bundle
 
 ## Requirements
 
 - Go 1.22+ to build
-- Windows to run the GUI
-- Linux/macOS can cross-compile the `.exe`
+- Windows: runs the `.exe`; Linux/macOS can cross-compile it
+- macOS 13+: runs the app; building it requires a Mac with the Xcode Command Line Tools (`xcode-select --install`) because the AppKit GUI uses cgo
 
-## Build
+## Build (Windows)
 
 ```bash
 ./build.sh
@@ -41,6 +42,29 @@ GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build \
 ```
 
 Output: `provider-checker.exe` (embeds Common Controls 6 + DPI awareness via `resource_windows.syso`).
+
+## Build (macOS)
+
+```bash
+./build_macos.sh
+# or
+make build-macos      # make run-macos builds and opens the app
+```
+
+Output: `dist/Provider Checker.app` (universal arm64 + x86_64, ad-hoc signed,
+minimum macOS 13) and `dist/provider-checker-macos.zip`. Set `ARCHS=arm64` to
+build one architecture, or `MACOSX_DEPLOYMENT_TARGET` / `VERSION` to override
+the minimum OS and bundle version. For a quick local run, `go build -o
+provider-checker . && ./provider-checker` also works.
+
+The app is not notarized. If a downloaded copy is blocked by Gatekeeper,
+right-click it and choose **Open**, or run
+`xattr -dr com.apple.quarantine "Provider Checker.app"`.
+
+The macOS window mirrors the Windows layout: the same form, capability
+checkboxes, Results / Log / History tabs, CSV export (save panel) and
+double-click-to-load history. **Return** runs a check and **⌘.** stops it;
+the standard Edit menu provides copy/paste in all fields.
 
 ## Usage
 
@@ -68,7 +92,7 @@ useful for detecting a proxy that routes a requested alias to a different
 concrete model. It is intentionally left blank when the provider does not
 declare a model; the app never substitutes the requested model name.
 
-History is stored under the user config dir: `provider-checker/history.json` (max 200 entries). API keys are DPAPI-protected on Windows and never written in plaintext.
+History is stored under the user config dir: `provider-checker/history.json` (max 200 entries; `%AppData%` on Windows, `~/Library/Application Support` on macOS). API keys are never written in plaintext: they are DPAPI-protected on Windows, and on macOS sealed with AES-256-GCM using a random key kept in your login Keychain (item "Provider Checker history key").
 
 ## Capability matrix
 
@@ -124,13 +148,21 @@ provider-checker/
 │   └── models.go            # ListModels implementations
 ├── runner/                  # Sequential run + cancel + events
 ├── history/                 # JSON history store (cross-platform)
+├── ui_common.go             # Shared front-end state, labels, cell text, CSV
+├── run_state.go / store_init.go  # Run records, model listing, history store init
 ├── main_windows.go          # Windows GUI
 ├── rows_windows.go          # Table models / colors
 ├── crypto_windows.go        # DPAPI secret helpers
-├── main_other.go            # Non-Windows entry stub
+├── macapp_darwin.go         # macOS controller (pure Go, tested with a fake view)
+├── cocoa_darwin.go          # macOS AppKit view (Objective-C via cgo)
+├── cocoa_export_darwin.go   # AppKit -> Go callbacks
+├── crypto_darwin.go         # Keychain-held key for history API keys
+├── secret_seal.go           # AES-GCM sealing used by the macOS build
+├── main_other.go            # Entry stub for other platforms / macOS without cgo
 ├── provider.manifest
 ├── resource_windows.syso
-├── build.sh
+├── build.sh                 # Windows build
+├── build_macos.sh           # macOS .app build
 ├── Makefile
 ├── LICENSE
 └── README.md
@@ -140,7 +172,8 @@ provider-checker/
 
 - API keys are only sent to the Base URL you configure.
 - Anthropic requests start with the official `x-api-key` scheme and retry once with Bearer auth only when the same endpoint returns `401`; this keeps official API keys and `ANTHROPIC_AUTH_TOKEN` gateways compatible.
-- History encrypts keys with DPAPI (current Windows user); ciphertext is not portable across machines/users.
+- History encrypts keys with DPAPI (current Windows user) or with a key in the macOS login Keychain; ciphertext is not portable across machines/users.
+- On macOS, rebuilding the (ad-hoc signed) app changes its code signature, so the first history save/load after a rebuild may ask for Keychain access; choose **Always Allow**. Denying it only skips storing/restoring the API key.
 - Prefer HTTPS endpoints and treat export/logs as potentially sensitive (requested and upstream model names, response snippets).
 
 ## License
