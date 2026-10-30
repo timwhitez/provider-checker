@@ -4,10 +4,8 @@ package main
 
 import (
 	"context"
-	"encoding/csv"
 	"fmt"
 	"os"
-	"sync"
 	"time"
 
 	"provider-checker/checker"
@@ -64,26 +62,9 @@ type uiRefs struct {
 	compSummary  *walk.Composite
 }
 
-// appState holds the mutable UI state shared between the UI goroutine and the run goroutine.
-type appState struct {
-	mu          sync.Mutex
-	providerKey string // selected provider type key
-	features    map[string]bool
-	running     bool
-	cancel      context.CancelFunc
-	results     []checker.FeatureResult
-	stores      *storeInit // shared, publish-once history store initialization
-	listing     modelListing
-}
-
 func main() {
-	st := &appState{
-		providerKey: checker.ProviderTypes()[0],
-		features:    map[string]bool{},
-		stores:      newStoreInit(),
-	}
-	// Default-select Basic for convenience.
-	st.features["basic"] = true
+	// Default provider with Basic selected for convenience (see newAppState).
+	st := newAppState()
 
 	providerTypes := checker.ProviderTypes()
 	providerLabels := make([]string, len(providerTypes))
@@ -496,18 +477,8 @@ func refreshStatus(sbi *walk.StatusBarItem, st *appState) {
 	pk := st.providerKey
 	running := st.running
 	st.mu.Unlock()
-	c, ok := checker.AllCheckers[pk]
-	supCount := 0
-	if ok {
-		supCount = len(c.Supported())
-	}
-	state := "Ready"
-	if running {
-		state = "Running..."
-	}
-	msg := fmt.Sprintf("  %s  \u00b7  Provider: %s  \u00b7  Capabilities: %d  ", state, checker.ProviderLabel(pk), supCount)
 	if sbi != nil {
-		sbi.SetText(msg)
+		sbi.SetText(statusLine(pk, running))
 	}
 }
 
@@ -560,12 +531,7 @@ func startRun(u *uiRefs, st *appState) {
 		return
 	}
 	pk := st.providerKey
-	feats := []string{}
-	for _, f := range checker.UnifiedFeatures {
-		if st.features[f.Key] {
-			feats = append(feats, f.Key)
-		}
-	}
+	feats := selectedFeatureKeys(st.features)
 	st.results = nil
 	st.mu.Unlock()
 
@@ -594,12 +560,7 @@ func startRun(u *uiRefs, st *appState) {
 	}
 
 	effort, mode := selectedReasoning(u)
-	if pk != "openai-response" {
-		mode = ""
-	}
-	if pk != "openai-response" && pk != "openai-chat" {
-		effort = ""
-	}
+	effort, mode = effectiveReasoning(pk, effort, mode)
 	cfg := checker.Config{
 		BaseURL:         baseURL,
 		APIKey:          apiKey,
@@ -622,7 +583,7 @@ func startRun(u *uiRefs, st *appState) {
 	refreshStatus(u.sbiStatus, st)
 	setSummary(u, "Running...  正在检测", colStatusInit)
 
-	appendLog(u.teLog, fmt.Sprintf("Starting check: provider=%s model=%s features=%v reasoning=%s", checker.ProviderLabel(pk), model, feats, reasoningLabel(effort, mode)))
+	appendLog(u.teLog, runStartLogLine(pk, model, feats, effort, mode))
 	u.resultsModel.reset()
 
 	go func() {
@@ -634,7 +595,7 @@ func startRun(u *uiRefs, st *appState) {
 				})
 			case "feature_start":
 				u.mw.Synchronize(func() {
-					appendLog(u.teLog, fmt.Sprintf("  -> [%d/%d] %s ...", ev.Index+1, ev.Total, checker.FeatureName(ev.Feature)))
+					appendLog(u.teLog, featureStartLogLine(ev.Index, ev.Total, ev.Feature))
 				})
 			case "feature_done":
 				r := ev.Result
@@ -642,21 +603,7 @@ func startRun(u *uiRefs, st *appState) {
 				record.results = append(record.results, r)
 				u.mw.Synchronize(func() {
 					u.resultsModel.add(r)
-					latency := ""
-					if r.Latency > 0 {
-						latency = fmt.Sprintf("%dms", r.Latency.Milliseconds())
-					}
-					line := fmt.Sprintf("  <- [%d/%d] %s: %s (%s)", ev.Index+1, ev.Total, r.Name, r.Status, latency)
-					if r.Detail != "" {
-						line += "  " + truncate(r.Detail, 80)
-					}
-					if r.UpstreamResponseModel != "" {
-						line += "  upstream_model=" + truncate(r.UpstreamResponseModel, 120)
-					}
-					if r.Error != "" {
-						line += "  err=" + truncate(r.Error, 120)
-					}
-					appendLog(u.teLog, line)
+					appendLog(u.teLog, featureDoneLogLine(ev.Index, ev.Total, r))
 				})
 			case "done":
 				u.mw.Synchronize(func() {
@@ -676,21 +623,24 @@ func startRun(u *uiRefs, st *appState) {
 					refreshStatus(u.sbiStatus, st)
 
 					// Summary strip color reflects outcome.
+					outcome := outcomeOf(p, f)
 					sumColor := walk.Color(colStatusPass)
-					if f > 0 && p == 0 {
+					switch outcome {
+					case outcomeFail:
 						sumColor = colStatusFail
-					} else if f > 0 {
+					case outcomeMixed:
 						sumColor = colStatusInit
 					}
-					setSummary(u, fmt.Sprintf("检测完成 / Done   PASS=%d   FAIL=%d   SKIP=%d   \u00b7   %s", p, f, s, model), sumColor)
+					setSummary(u, runDoneSummary(p, f, s, model), sumColor)
 
 					// Persist to history (best effort). Cancelled runs still recorded.
 					saveHistory(u, st, record)
 
 					icon := walk.MsgBoxIconInformation
-					if f > 0 && p == 0 {
+					switch outcome {
+					case outcomeFail:
 						icon = walk.MsgBoxIconError
-					} else if f > 0 {
+					case outcomeMixed:
 						icon = walk.MsgBoxIconWarning
 					}
 					walk.MsgBox(u.mw, "Check Complete", fmt.Sprintf("PASS=%d   FAIL=%d   SKIP=%d", p, f, s), icon)
@@ -895,39 +845,6 @@ func completeModelListing(u *uiRefs, st *appState, generation uint64, models []s
 	setSummary(u, fmt.Sprintf("已加载 %d 个模型 / Loaded %d models", len(models), len(models)), colStatusInit)
 }
 
-// providerIndex returns the dropdown index for a provider type key, or -1.
-func providerIndex(key string) int {
-	for i, t := range checker.ProviderTypes() {
-		if t == key {
-			return i
-		}
-	}
-	return -1
-}
-
-// parseIntDefault parses s as int, returning def on error.
-func parseIntDefault(s string, def int) (int, error) {
-	if s == "" {
-		return def, nil
-	}
-	var n int
-	_, err := fmt.Sscanf(s, "%d", &n)
-	if err != nil {
-		return def, err
-	}
-	if n <= 0 {
-		return def, nil
-	}
-	return n, nil
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
-}
-
 // exportCSV writes the given results to a CSV file chosen by the user.
 func exportCSV(mw *walk.MainWindow, results []checker.FeatureResult) {
 	if len(results) == 0 {
@@ -936,7 +853,7 @@ func exportCSV(mw *walk.MainWindow, results []checker.FeatureResult) {
 	}
 	dlg := walk.FileDialog{
 		Filter:   "CSV files (*.csv)|*.csv|All files (*.*)|*.*",
-		FilePath: fmt.Sprintf("provider-check-%s.csv", time.Now().Format("20060102-150405")),
+		FilePath: defaultCSVName(time.Now()),
 		Title:    "Save results as CSV",
 	}
 	if ok, _ := dlg.ShowSave(mw); !ok {
@@ -951,31 +868,6 @@ func exportCSV(mw *walk.MainWindow, results []checker.FeatureResult) {
 		return
 	}
 	walk.MsgBox(mw, "Exported", "Saved to "+path, walk.MsgBoxIconInformation)
-}
-
-// writeResultsCSV encodes feature results as CSV at path.
-func writeResultsCSV(path string, results []checker.FeatureResult) error {
-	f, err := os.Create(path)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-
-	w := csv.NewWriter(f)
-	if err := w.Write([]string{"Feature", "Status", "LatencyMs", "UpstreamResponseModel", "Detail", "Error"}); err != nil {
-		return err
-	}
-	for _, r := range results {
-		lat := ""
-		if r.Latency > 0 {
-			lat = fmt.Sprintf("%d", r.Latency.Milliseconds())
-		}
-		if err := w.Write([]string{r.Name, r.Status.String(), lat, r.UpstreamResponseModel, r.Detail, r.Error}); err != nil {
-			return err
-		}
-	}
-	w.Flush()
-	return w.Error()
 }
 
 // invalidateModels is called on the UI thread for any listing ownership change.
@@ -999,10 +891,11 @@ func refreshReasoning(u *uiRefs, st *appState) {
 	st.mu.Lock()
 	pk := st.providerKey
 	st.mu.Unlock()
+	effortOK, modeOK := reasoningControls(pk)
 	if u.cbEffort != nil {
-		u.cbEffort.SetEnabled(pk == "openai-chat" || pk == "openai-response")
+		u.cbEffort.SetEnabled(effortOK)
 	}
 	if u.cbMode != nil {
-		u.cbMode.SetEnabled(pk == "openai-response")
+		u.cbMode.SetEnabled(modeOK)
 	}
 }

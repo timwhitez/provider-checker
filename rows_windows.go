@@ -3,8 +3,6 @@
 package main
 
 import (
-	"fmt"
-	"strings"
 	"sync"
 
 	"provider-checker/checker"
@@ -60,23 +58,8 @@ func (m *resultModel) Value(row, col int) interface{} {
 	if row < 0 || row >= len(m.results) {
 		return nil
 	}
-	r := m.results[row]
-	switch col {
-	case 0:
-		return r.Name
-	case 1:
-		return r.Status.String()
-	case 2:
-		if r.Latency > 0 {
-			return fmt.Sprintf("%dms", r.Latency.Milliseconds())
-		}
-		return ""
-	case 3:
-		return r.UpstreamResponseModel
-	case 4:
-		return r.Detail
-	case 5:
-		return r.Error
+	if text, ok := resultCellText(m.results[row], col); ok {
+		return text
 	}
 	return nil
 }
@@ -141,20 +124,8 @@ func (m *historyModel) Value(row, col int) interface{} {
 	if row < 0 || row >= len(m.records) {
 		return nil
 	}
-	r := m.records[row]
-	switch col {
-	case 0:
-		return r.Time.Format("2006-01-02 15:04:05")
-	case 1:
-		return r.ProviderLabel
-	case 2:
-		return r.Model
-	case 3:
-		return featureNames(r.Features)
-	case 4:
-		return r.Summary()
-	case 5:
-		return reasoningLabel(r.ReasoningEffort, r.ReasoningMode)
+	if text, ok := historyCellText(m.records[row], col); ok {
+		return text
 	}
 	return nil
 }
@@ -175,78 +146,6 @@ func (m *historyModel) recordAt(row int) (history.Record, bool) {
 		return history.Record{}, false
 	}
 	return m.records[row], true
-}
-
-// featureNames maps unified feature keys to a compact display string.
-func featureNames(keys []string) string {
-	if len(keys) == 0 {
-		return ""
-	}
-	parts := make([]string, 0, len(keys))
-	for _, k := range keys {
-		name := checker.FeatureName(k)
-		// Prefer the English tail after "/" if present for compactness.
-		if i := strings.LastIndex(name, "/"); i >= 0 {
-			name = strings.TrimSpace(name[i+1:])
-		}
-		parts = append(parts, name)
-	}
-	return strings.Join(parts, ", ")
-}
-
-// reasoningEffortLabels returns friendly combo labels aligned by index with
-// checker.ReasoningEfforts (index 0 == "" == provider default).
-func reasoningEffortLabels() []string {
-	out := make([]string, len(checker.ReasoningEfforts))
-	for i, v := range checker.ReasoningEfforts {
-		if v == "" {
-			out[i] = "默认 / Default"
-		} else {
-			out[i] = v
-		}
-	}
-	return out
-}
-
-// reasoningModeLabels returns friendly combo labels aligned by index with
-// checker.ReasoningModes (index 0 == "" == provider default).
-func reasoningModeLabels() []string {
-	out := make([]string, len(checker.ReasoningModes))
-	for i, v := range checker.ReasoningModes {
-		switch v {
-		case "":
-			out[i] = "默认 / Default"
-		case "pro":
-			out[i] = "pro (专业模式)"
-		default:
-			out[i] = v
-		}
-	}
-	return out
-}
-
-// indexOfString returns the position of v in list, or 0 if not found.
-func indexOfString(list []string, v string) int {
-	for i, s := range list {
-		if s == v {
-			return i
-		}
-	}
-	return 0
-}
-
-// reasoningLabel formats reasoning effort/mode for display.
-func reasoningLabel(effort, mode string) string {
-	switch {
-	case effort == "" && mode == "":
-		return "-"
-	case mode == "":
-		return effort
-	case effort == "":
-		return "mode=" + mode
-	default:
-		return effort + " / " + mode
-	}
 }
 
 // styleHistoryCell adds alternating-row shading and colors the summary column.
