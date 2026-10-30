@@ -54,8 +54,11 @@ make build-macos      # make run-macos builds and opens the app
 Output: `dist/Provider Checker.app` (universal arm64 + x86_64, ad-hoc signed,
 minimum macOS 13) and `dist/provider-checker-macos.zip`. Set `ARCHS=arm64` to
 build one architecture, or `MACOSX_DEPLOYMENT_TARGET` / `VERSION` to override
-the minimum OS and bundle version. For a quick local run, `go build -o
-provider-checker . && ./provider-checker` also works.
+the minimum OS and bundle version (`BUILD_NUMBER` sets `CFBundleVersion`,
+default: git commit count). For a quick local run, `go build -o
+provider-checker . && ./provider-checker` also works, but that binary targets
+the macOS version of the build machine; use `build_macos.sh` for anything you
+distribute.
 
 The app is not notarized. If a downloaded copy is blocked by Gatekeeper,
 right-click it and choose **Open**, or run
@@ -63,7 +66,7 @@ right-click it and choose **Open**, or run
 
 The macOS window mirrors the Windows layout: the same form, capability
 checkboxes, Results / Log / History tabs, CSV export (save panel) and
-double-click-to-load history. **Return** runs a check and **⌘.** stops it;
+double-click-to-load history. **⌘R** runs a check and **⌘.** stops it;
 the standard Edit menu provides copy/paste in all fields.
 
 ## Usage

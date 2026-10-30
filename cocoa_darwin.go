@@ -421,8 +421,11 @@ void pc_app_create(const char **features, int featureCount) {
 		NSBox *caps = pcGroup(@"Capabilities to Check  /  待检测能力 (multi-select)", checks, NO);
 
 		// ---- Actions ----
-		NSButton *run = pcButton(PC_W_RUN, @"▶  Run Check", @"Run the selected capability checks (Return)");
-		run.keyEquivalent = @"\r";
+		// Cmd+R rather than Return: Return belongs to the text fields and the
+		// model combo box (choosing a listed model must not start a run).
+		NSButton *run = pcButton(PC_W_RUN, @"▶  Run Check", @"Run the selected capability checks (⌘R)");
+		run.keyEquivalent = @"r";
+		run.keyEquivalentModifierMask = NSEventModifierFlagCommand;
 		NSButton *stop = pcButton(PC_W_STOP, @"■  Stop", @"Stop the running check (⌘.)");
 		stop.keyEquivalent = @".";
 		stop.keyEquivalentModifierMask = NSEventModifierFlagCommand;

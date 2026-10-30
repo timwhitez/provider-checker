@@ -7,6 +7,7 @@
 #   ARCHS="arm64"                     build a single architecture
 #   MACOSX_DEPLOYMENT_TARGET=13.0     minimum macOS version
 #   VERSION=1.2.3                     CFBundleShortVersionString
+#   BUILD_NUMBER=42                   CFBundleVersion (default: git commit count)
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -25,7 +26,17 @@ BUNDLE_ID="io.github.timwhitez.provider-checker"
 EXE="provider-checker"
 ARCHS="${ARCHS:-arm64 amd64}"
 VERSION="${VERSION:-1.0.0}"
-BUILD="$(git rev-parse --short HEAD 2>/dev/null || echo 0)"
+# CFBundleVersion must be numeric (period-separated integers), so use the
+# commit count rather than a hash.
+BUILD="${BUILD_NUMBER:-$(git rev-list --count HEAD 2>/dev/null || echo 1)}"
+if [[ ! "$BUILD" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+  echo "BUILD_NUMBER must be 1-3 period-separated integers, got: $BUILD" >&2
+  exit 1
+fi
+if [[ ! "$VERSION" =~ ^[0-9]+(\.[0-9]+){0,2}$ ]]; then
+  echo "VERSION must be 1-3 period-separated integers, got: $VERSION" >&2
+  exit 1
+fi
 # Recent Go runtimes require macOS 13; pin every C/ObjC object to the same
 # target (CGO_* flags are part of Go's build cache key, the env var is not).
 export MACOSX_DEPLOYMENT_TARGET="${MACOSX_DEPLOYMENT_TARGET:-13.0}"
