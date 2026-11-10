@@ -175,8 +175,7 @@ func (a *macApp) start() {
 		if store == nil {
 			return
 		}
-		recs := store.Records()
-		a.v.Synchronize(func() { a.setRecords(recs) })
+		a.v.Synchronize(func() { a.setRecords(store.Records()) })
 	}()
 }
 

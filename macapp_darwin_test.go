@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -176,6 +177,108 @@ func TestMacStartInitialState(t *testing.T) {
 	}
 	if !strings.Contains(v.status, "Ready") || !strings.Contains(v.summary, "No run yet") {
 		t.Fatalf("status %q summary %q", v.status, v.summary)
+	}
+}
+
+// startupBlockedView pauses the sole startup callback before it enters the FIFO.
+type startupBlockedView struct {
+	*fakeView
+	entered, release, forwarded chan struct{}
+	executed                    bool // owned by the test's main thread
+}
+
+func (v *startupBlockedView) Synchronize(fn func()) {
+	close(v.entered)
+	<-v.release
+	v.fakeView.Synchronize(func() {
+		fn()
+		v.executed = true
+	})
+	close(v.forwarded)
+}
+
+func TestMacStartupHistoryUsesCurrentStore(t *testing.T) {
+	for _, action := range []string{"clear", "save", "cancel clear"} {
+		t.Run(action, func(t *testing.T) {
+			v := &startupBlockedView{
+				fakeView: newFakeView(), entered: make(chan struct{}),
+				release: make(chan struct{}), forwarded: make(chan struct{}),
+			}
+			var releaseOnce sync.Once
+			release := func() { releaseOnce.Do(func() { close(v.release) }) }
+			t.Cleanup(func() {
+				release()
+				select {
+				case <-v.entered:
+					select {
+					case <-v.forwarded:
+					case <-time.After(5 * time.Second):
+						t.Error("startup callback did not finish forwarding")
+					}
+				default:
+				}
+			})
+
+			path := filepath.Join(t.TempDir(), "history.json")
+			store, err := history.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := store.Add(history.Record{Time: time.Unix(1, 0), Model: "old"}); err != nil {
+				t.Fatal(err)
+			}
+			identity := func(s string) (string, error) { return s, nil }
+			a := newMacApp(v, newAppState(), identity, identity)
+			a.openStore = func() (*history.Store, error) { return history.Open(path) }
+			a.now = func() time.Time { return time.Unix(2, 0) }
+			a.start()
+			select {
+			case <-v.entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("startup callback did not reach dispatch barrier")
+			}
+
+			want := ""
+			switch action {
+			case "clear":
+				v.confirm = true
+				a.handleEvent(wHistoryClear, evAction)
+			case "save":
+				a.saveHistory(newRunRecord("openai-chat", checker.Config{Model: "new"}, "", []string{"basic"}))
+				want = "new,old"
+			case "cancel clear":
+				a.handleEvent(wHistoryRefresh, evAction)
+				a.handleEvent(wHistoryClear, evAction)
+				want = "old"
+			}
+			assertHistory := func() {
+				t.Helper()
+				reopened, err := history.Open(path)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for name, records := range map[string][]history.Record{
+					"visible": a.records, "shared": a.st.stores.get().Records(), "disk": reopened.Records(),
+				} {
+					var models []string
+					for _, rec := range records {
+						models = append(models, rec.Model)
+					}
+					if got := strings.Join(models, ","); got != want {
+						t.Errorf("%s history = %q, want %q", name, got, want)
+					}
+				}
+			}
+			assertHistory()
+			release()
+			select {
+			case <-v.forwarded:
+			case <-time.After(5 * time.Second):
+				t.Fatal("startup callback was not queued")
+			}
+			v.pump(t, func() bool { return v.executed })
+			assertHistory()
+		})
 	}
 }
 
