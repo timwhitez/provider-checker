@@ -39,14 +39,14 @@ func SupportsListModels(c Checker) bool {
 func getJSON(ctx context.Context, cfg Config, url string, setHeaders func(*http.Request), v any) error {
 	req, err := newReq(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return err
+		return safeRequestError(err, cfg.APIKey)
 	}
 	if setHeaders != nil {
 		setHeaders(req)
 	}
 	resp, err := httpClient(cfg).Do(req)
 	if err != nil {
-		return err
+		return safeRequestError(err, cfg.APIKey)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
@@ -137,7 +137,7 @@ func (GeminiChecker) ListModels(ctx context.Context, cfg Config) ([]string, erro
 	base := normalizeGemini(cfg.BaseURL)
 	u, err := url.Parse(base + "/models")
 	if err != nil {
-		return nil, err
+		return nil, safeRequestError(err, cfg.APIKey)
 	}
 	q := u.Query()
 	q.Set("pageSize", "1000")
