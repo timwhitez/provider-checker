@@ -62,3 +62,19 @@ budget, and a 120 Unicode character snippet. These are probe limits, not general
 provider limits. Keep tests offline with local `httptest` fixtures; coverage in
 `checker/http_test.go` and `checker/upstream_model_test.go` includes framing,
 read boundaries, partial results, errors, budgets, and all four provider paths.
+
+## Synchronous JSON probes
+
+All synchronous response decoders use `decodeJSON`: capability responses have a
+1 MiB budget, while model listings have 8 MiB for richer metadata. These are
+local resource limits, not provider API limits. Synthetic fixtures cover every
+synchronous capability route and 1000 model entries with 2 KiB of description
+metadata each (over 2 MiB total). They establish compatibility with those
+fixtures, not all possible provider responses.
+
+The budget counts decompressed bytes actually read by the decoder, including
+read-ahead, plus at most one byte used to detect overflow. Exceeding it reports
+`local JSON read limit exceeded` and cannot produce a capability PASS or a
+partial successful model list. The decoder does not drain the body, require a
+new EOF after a complete JSON value, or change caller-owned closing behavior.
+SSE and HTTP-error budgets remain separate. See `checker/json_budget_test.go`.

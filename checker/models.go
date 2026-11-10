@@ -2,7 +2,6 @@ package checker
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -53,7 +52,7 @@ func getJSON(ctx context.Context, cfg Config, url string, setHeaders func(*http.
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
-	return json.NewDecoder(resp.Body).Decode(v)
+	return decodeJSON(resp.Body, v, modelListJSONLimit)
 }
 
 // dedupeSort returns a de-duplicated, sorted copy of ids (empty entries dropped).
@@ -122,7 +121,7 @@ func (AnthropicChecker) ListModels(ctx context.Context, cfg Config) ([]string, e
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+	if err := decodeJSON(resp.Body, &r, modelListJSONLimit); err != nil {
 		return nil, err
 	}
 	ids := make([]string, 0, len(r.Data))
