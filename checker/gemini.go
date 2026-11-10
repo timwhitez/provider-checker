@@ -243,7 +243,7 @@ func geminiURL(base, model, method, apiKey string, sse bool) (string, error) {
 	modelPath := strings.TrimPrefix(model, "models/")
 	u, err := url.Parse(base + "/models/" + url.PathEscape(modelPath) + ":" + method)
 	if err != nil {
-		return "", err
+		return "", safeRequestError(err, apiKey)
 	}
 	q := u.Query()
 	if apiKey != "" {

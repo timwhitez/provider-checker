@@ -26,14 +26,14 @@ func postJSON(ctx context.Context, cfg Config, url string, body any, setAuth fun
 	}
 	req, err := newReq(ctx, http.MethodPost, url, bytes.NewReader(b))
 	if err != nil {
-		return nil, err
+		return nil, safeRequestError(err, cfg.APIKey)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if setAuth != nil {
 		setAuth(req)
 	}
 	resp, err := httpClient(cfg).Do(req)
-	return trackResponseModel(resp), err
+	return trackResponseModel(resp), safeRequestError(err, cfg.APIKey)
 }
 
 // responseModelBody retains the bytes consumed by a decoder so the raw model
