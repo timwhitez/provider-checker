@@ -129,7 +129,7 @@ func (c AnthropicChecker) Test(ctx context.Context, cfg Config, feature, prompt 
 				Input any    `json:"input"`
 			} `json:"content"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		if err := decodeJSON(resp.Body, &r, probeJSONLimit); err != nil {
 			return fail("Tool Use", start, err)
 		}
 		// Only the first tool_use block is selected and verified
@@ -169,7 +169,7 @@ func (c AnthropicChecker) Test(ctx context.Context, cfg Config, feature, prompt 
 				OutputTokens *int `json:"output_tokens"`
 			} `json:"usage"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		if err := decodeJSON(resp.Body, &r, probeJSONLimit); err != nil {
 			return failResponseMsg("Max Tokens", start, err.Error(), resp)
 		}
 		text := ""
@@ -275,7 +275,7 @@ func decodeAnthropicText(rd io.Reader) (string, error) {
 			Text string `json:"text"`
 		} `json:"content"`
 	}
-	if err := json.NewDecoder(rd).Decode(&v); err != nil {
+	if err := decodeJSON(rd, &v, probeJSONLimit); err != nil {
 		return "", err
 	}
 	var text string

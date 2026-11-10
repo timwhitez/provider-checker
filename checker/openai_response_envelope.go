@@ -82,7 +82,7 @@ func (b *responsesSyncBody) toolCall() *responsesSyncOutput {
 
 func decodeResponsesSyncBody(rd io.Reader) (*responsesSyncBody, error) {
 	var b responsesSyncBody
-	if err := json.NewDecoder(rd).Decode(&b); err != nil {
+	if err := decodeJSON(rd, &b, probeJSONLimit); err != nil {
 		return nil, err
 	}
 	return &b, nil

@@ -141,7 +141,7 @@ func (c GeminiChecker) Test(ctx context.Context, cfg Config, feature, prompt str
 				} `json:"content"`
 			} `json:"candidates"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		if err := decodeJSON(resp.Body, &r, probeJSONLimit); err != nil {
 			return fail("Function Calling", start, err)
 		}
 		// Only the first functionCall part is selected and verified
@@ -286,7 +286,7 @@ func decodeGeminiText(rd io.Reader) (string, error) {
 			} `json:"content"`
 		} `json:"candidates"`
 	}
-	if err := json.NewDecoder(rd).Decode(&v); err != nil {
+	if err := decodeJSON(rd, &v, probeJSONLimit); err != nil {
 		return "", err
 	}
 	for _, c := range v.Candidates {

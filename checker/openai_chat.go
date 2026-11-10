@@ -151,7 +151,7 @@ func (c OpenAIChatChecker) Test(ctx context.Context, cfg Config, feature, prompt
 				} `json:"message"`
 			} `json:"choices"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		if err := decodeJSON(resp.Body, &r, probeJSONLimit); err != nil {
 			return fail("Tool Calling", start, err)
 		}
 		if len(r.Choices) == 0 || len(r.Choices[0].Message.ToolCalls) == 0 {
@@ -220,7 +220,7 @@ func (c OpenAIChatChecker) Test(ctx context.Context, cfg Config, feature, prompt
 				CompletionTokens *int `json:"completion_tokens"`
 			} `json:"usage"`
 		}
-		if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		if err := decodeJSON(resp.Body, &r, probeJSONLimit); err != nil {
 			return failResponseMsg("Max Tokens", start, err.Error(), resp)
 		}
 		if len(r.Choices) == 0 {
@@ -277,7 +277,7 @@ func decodeOAIChatText(r io.Reader) (string, error) {
 			} `json:"message"`
 		} `json:"choices"`
 	}
-	if err := json.NewDecoder(r).Decode(&v); err != nil {
+	if err := decodeJSON(r, &v, probeJSONLimit); err != nil {
 		return "", err
 	}
 	if len(v.Choices) == 0 {
